@@ -1,0 +1,14 @@
+[project]
+name = "turing-adjuster"
+version = "0.1.0"
+description = "Jamie — a Turing-grade phone-based claims intake specialist. Big Berlin Hack / Inca."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+testpaths = ["tests"]
