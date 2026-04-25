@@ -3,21 +3,27 @@ google-genai>=0.3.0           # Gemini 3 Flash via google-genai SDK
 anthropic>=0.39.0             # juror bot only
 
 # --- Voice ---
-# Production voice loop:
-livekit-agents[gradium]~=1.4
-# Fast prototyping (Person A H0–H4 step):
-gradbot>=0.2.0
-# Direct streaming TTS for tools/scripts:
+# Production voice loop (current PyPI: 1.5.6; pin spans 1.4–1.x):
+livekit-agents[gradium]>=1.4,<2.0
+# Fast prototyping (Person A H0–H4 step). Real PyPI tops out at 0.1.6 today;
+# do NOT pin >=0.2.0 — that version doesn't exist yet:
+gradbot>=0.1.5
+# Direct streaming TTS for tools/scripts (current PyPI: 0.5.11):
 gradium>=0.5.0
 
 # --- Real-time tools ---
 tavily-python>=0.5.0
 
 # --- Extraction (Pioneer / Fastino bounty) ---
+# current PyPI: gliner 0.2.26
 gliner>=0.2.13
 transformers>=4.45.0
 torch>=2.4.0
 huggingface-hub>=0.25.0
+
+# Note on Python version: livekit-agents requires Python <3.15.  If you're
+# on Python 3.14, everything in this file installs cleanly.  On 3.13 or 3.12
+# you'll just get older livekit-agents 1.4.x — that's fine for our use.
 
 # --- Bridge & dashboard ---
 fastapi>=0.115.0

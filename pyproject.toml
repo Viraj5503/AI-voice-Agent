@@ -2,7 +2,7 @@
 name = "turing-adjuster"
 version = "0.1.0"
 description = "Jamie — a Turing-grade phone-based claims intake specialist. Big Berlin Hack / Inca."
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.15"   # livekit-agents tops out at <3.15
 readme = "README.md"
 
 [tool.ruff]
