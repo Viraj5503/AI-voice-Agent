@@ -77,7 +77,12 @@ async def cmd_list() -> int:
     finally:
         await lk.aclose()
 
-    print(f"\nLiveKit URL:  {os.environ.get('LIVEKIT_URL')}")
+    lk_url = os.environ.get("LIVEKIT_URL", "")
+    project = lk_url.replace("wss://", "").replace("ws://", "").rstrip("/").split(".")[0]
+    sip_uri = f"sip:{project}.sip.livekit.cloud" if project else "(unknown)"
+
+    print(f"\nLiveKit URL:  {lk_url}")
+    print(f"SIP URI:      {sip_uri}    ← give this to Twilio")
     print(f"Twilio #:     {_twilio_number() or '(not set)'}")
 
     print(f"\nInbound trunks ({len(trunks.items)}):")

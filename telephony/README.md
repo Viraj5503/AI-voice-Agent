@@ -69,3 +69,54 @@ We close any remaining gap with **filler audio** (`fillers/manifest.json`): the 
 ## Multiplexing
 
 Single WebSocket, multiple `client_req_id` concurrent TTS streams — see `voice/multiplex_demo.py`. This is the bounty pitch story for "production scale."
+
+---
+
+## Operating without Twilio Console access
+
+If Inca handed you API credentials but not dashboard login, you can't open the Voice Configuration UI — but the demo doesn't depend on it. Here are the paths that work tonight while you wait on Twilio.
+
+### Verify what you already have
+
+```bash
+python telephony/setup_sip.py list      # LiveKit trunk + rule + SIP URI
+python telephony/twilio_client.py        # Twilio creds — known to 401 right now
+```
+
+The LiveKit side is already wired. The only missing hop is Twilio → LiveKit's SIP URI. Three ways to demo without that hop:
+
+### Path 1 — Local laptop demo (zero infra, ~10 sec to start)
+
+Best for solo iteration and proving the pipeline. No LiveKit Cloud round-trip.
+
+```bash
+python voice/livekit_agent.py console
+```
+
+Uses MacBook mic + speakers via `sounddevice`. Same JamieAgent code as production, same bridge events. The only difference: no LiveKit room, no telephony.
+
+### Path 2 — Browser caller via LiveKit Agents Playground (~3 min)
+
+Best for showing judges. Caller experience matches a real phone call.
+
+1. `python voice/livekit_agent.py start` (already running ✓)
+2. Open https://agents-playground.livekit.io
+3. "Connect to a custom server" → paste:
+   - URL: `wss://bbh-inca-n9i26bo3.livekit.cloud`
+   - API Key + API Secret from `.env`
+4. Click "Connect" → playground creates a room → your worker auto-dispatches → talk to Jamie in the browser.
+
+This path uses your LiveKit project end-to-end (token auth, SIP-side dispatch rule still works for phone tomorrow). The browser caller is a fully realistic stand-in for Twilio.
+
+### Path 3 — Programmatic Twilio config (when creds work)
+
+Once Inca refreshes the API Key:
+
+```bash
+python telephony/configure_twilio.py status   # what's set today
+TWIML_URL=https://your-host/twiml.xml \
+  python telephony/configure_twilio.py apply  # point # at LiveKit
+python telephony/configure_twilio.py revert   # undo
+```
+
+The `apply` step needs a public URL serving the TwiML payload (which the script prints for you). For hackathon speed: `python -m http.server 5000` + `ngrok http 5000`. Or a Cloudflare Worker. Or once you have Console access, a TwiML Bin.

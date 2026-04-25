@@ -4,9 +4,11 @@ anthropic>=0.39.0             # juror bot only
 
 # --- Voice ---
 # Production voice loop with Gradium STT/TTS + native Google/Gemini LLM
-# + Silero VAD.  The voice loop in voice/livekit_agent.py needs all three
-# plugin extras.  Pin span 1.4–1.x — current PyPI is 1.5.6.
-livekit-agents[gradium,google,silero]>=1.4,<2.0
+# + Silero VAD.  Adds openai extra so we can swing the LLM hop to a local
+# Ollama instance via its OpenAI-compatible /v1 endpoint when Gemini's
+# free tier is throttled — see voice/livekit_agent.py:_build_llm.
+# Pin span 1.4–1.x — current PyPI is 1.5.6.
+livekit-agents[gradium,google,openai,silero]>=1.4,<2.0
 # Fast laptop-mic prototyping (Person A H0–H4 step). Real PyPI tops out
 # at 0.1.6; do NOT pin >=0.2.0 — that version doesn't exist:
 gradbot>=0.1.5

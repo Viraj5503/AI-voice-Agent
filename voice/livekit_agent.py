@@ -53,6 +53,7 @@ try:
     from livekit.agents.llm import ChatContext
     from livekit.plugins import gradium as lk_gradium
     from livekit.plugins import google as lk_google
+    from livekit.plugins import openai as lk_openai
     from livekit.plugins import silero as lk_silero
     _VOICE_DEPS = True
 except Exception as _voice_import_error:  # noqa: BLE001
@@ -65,18 +66,43 @@ def load_crm(name: str) -> dict:
 
 
 # --------------------------------------------------------------------------
+def _build_llm():
+    """Pick the LLM based on BRAIN_PROVIDER, mirroring agent.brain.make_brain.
+
+    BRAIN_PROVIDER=ollama  →  livekit-plugins-openai pointed at local Ollama
+                              (no quota, ~1-2s per turn on M-series).
+    BRAIN_PROVIDER=gemini  →  livekit-plugins-google native Gemini.
+    default                →  ollama (free-tier quota survival).
+
+    The Gradium STT/TTS path is unaffected — only the LLM hop changes.
+    """
+    provider = (os.environ.get("BRAIN_PROVIDER") or "ollama").lower()
+
+    if provider == "gemini":
+        return lk_google.LLM(
+            model=os.environ.get("GEMINI_MODEL", "gemini-flash-latest"),
+            temperature=0.85,
+        )
+
+    # ollama via OpenAI-compatible /v1/chat/completions endpoint
+    base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434") + "/v1"
+    return lk_openai.LLM(
+        model=os.environ.get("OLLAMA_MODEL", "llama3.2"),
+        api_key="ollama",  # placeholder — Ollama doesn't auth, but the SDK requires a string
+        base_url=base_url,
+        temperature=0.85,
+    )
+
+
 def build_session(crm: dict, state: ClaimState):
-    """Construct an AgentSession with Gradium voice + native Gemini brain."""
+    """Construct an AgentSession with Gradium voice + provider-pluggable brain."""
     # GRADIUM_VOICE_ID falls through to the plugin's documented default
     # (YTpq7expH9539ERJ — flagship "Emma") when unset.
     voice_id = os.environ.get("GRADIUM_VOICE_ID") or None
 
     return AgentSession(
         stt=lk_gradium.STT(),
-        llm=lk_google.LLM(
-            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
-            temperature=0.85,
-        ),
+        llm=_build_llm(),
         tts=lk_gradium.TTS(voice_id=voice_id) if voice_id else lk_gradium.TTS(),
         vad=lk_silero.VAD.load(),
     )
@@ -178,7 +204,9 @@ def build_agent(crm: dict, state: ClaimState):
                 })
 
             # Refresh Jamie's system prompt with the new claim state.
-            self.update_instructions(build_jamie_system_prompt(crm, state))
+            # update_instructions is async — without await, the prompt never
+            # actually refreshes turn-to-turn (RuntimeWarning fires).
+            await self.update_instructions(build_jamie_system_prompt(crm, state))
 
         async def on_exit(self) -> None:  # type: ignore[override]
             await bridge_publish({
