@@ -21,7 +21,7 @@ sys.path.insert(0, str(REPO))
 
 try:
     from dotenv import load_dotenv  # type: ignore
-    load_dotenv(REPO / ".env")
+    load_dotenv(REPO / ".env", override=True)
 except Exception:
     pass
 

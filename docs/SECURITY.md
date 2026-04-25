@@ -10,7 +10,7 @@ Insurance call intake processes Article 9 health data (injury descriptions), Art
 | Persisted juror-bot transcripts (`tests/juror_results.json`) | Synthetic jurors only — no real PII, but redaction still applied for hygiene | yes |
 | GLiNER2 extractor inputs | Caller utterances | local-only (no external API call); model runs on-device |
 | Tavily lookups | Free-form location strings only — no PII sent | n/a |
-| Gemini 3 Flash | Full conversation | governed by Google's API data-use terms (no training on API data) |
+| Gemini Flash (rolling) | Full conversation | governed by Google's API data-use terms (no training on API data); model alias `gemini-flash-latest` |
 
 ## PII redactor
 

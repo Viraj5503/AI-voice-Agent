@@ -66,7 +66,7 @@ if __name__ == "__main__":
     from dotenv import load_dotenv  # type: ignore
     from pathlib import Path
 
-    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
     print(f"  Twilio: {auth_mode_summary()}")
     try:
         c = get_twilio_client()

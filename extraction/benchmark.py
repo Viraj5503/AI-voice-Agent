@@ -25,7 +25,7 @@ from statistics import mean
 # Load .env so GOOGLE_API_KEY is available when run as `python -m extraction.benchmark`.
 try:
     from dotenv import load_dotenv  # type: ignore
-    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
 except Exception:
     pass
 

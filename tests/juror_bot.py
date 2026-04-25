@@ -28,12 +28,12 @@ sys.path.insert(0, str(REPO))
 
 try:
     from dotenv import load_dotenv  # type: ignore
-    load_dotenv(REPO / ".env")
+    load_dotenv(REPO / ".env", override=True)
 except Exception:
     pass
 
+from agent.brain import make_brain
 from agent.claim_state import ClaimState
-from agent.gemini_client import GeminiBrain
 from agent.prompts import build_jamie_system_prompt, opening_line
 
 
@@ -153,7 +153,9 @@ async def simulate_call(
     max_turns: int = 8,
 ) -> CallResult:
     state = ClaimState(call_id=f"juror-{persona['name']}")
-    brain = GeminiBrain()
+    # make_brain() respects BRAIN_PROVIDER, so the harness survives a Gemini
+    # quota lockout by falling through to local Ollama.
+    brain = make_brain()
     transcript: list[dict] = []
 
     # Jamie speaks first
