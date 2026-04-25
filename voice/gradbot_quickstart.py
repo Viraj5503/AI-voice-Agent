@@ -26,6 +26,13 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+# Load .env so GRADIUM_API_KEY / GRADIUM_VOICE_ID are picked up automatically.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(REPO / ".env", override=True)
+except Exception:
+    pass
+
 from agent.claim_state import ClaimState
 from agent.prompts import build_jamie_system_prompt, opening_line
 

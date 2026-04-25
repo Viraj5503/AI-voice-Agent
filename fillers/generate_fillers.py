@@ -18,6 +18,14 @@ HERE = Path(__file__).resolve().parent
 AUDIO = HERE / "audio"
 MANIFEST = HERE / "manifest.json"
 
+# Load .env so GRADIUM_API_KEY / GRADIUM_VOICE_ID are picked up automatically.
+# override=True so empty shell exports don't shadow the .env value.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(HERE.parent / ".env", override=True)
+except Exception:
+    pass
+
 
 async def synth_one(client, voice_id: str, text: str, out_path: Path) -> None:
     """Use gradium 0.5.11's tts_stream() — simpler API for batch synthesis

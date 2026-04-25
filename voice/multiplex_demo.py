@@ -14,6 +14,14 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
+from pathlib import Path
+
+# Load .env so GRADIUM_API_KEY / GRADIUM_VOICE_ID are picked up automatically.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
+except Exception:
+    pass
 
 
 SCRIPTS = [
