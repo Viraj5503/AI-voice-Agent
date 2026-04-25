@@ -26,7 +26,9 @@ except Exception:  # pragma: no cover - graceful degradation
     _HAVE_GENAI = False
 
 
-DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3-flash")
+# gemini-3-flash isn't on the public v1beta endpoint as of April 2026 — fall
+# back to gemini-2.5-flash, which is the actual latency-optimized model.
+DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 
 
 class GeminiBrain:

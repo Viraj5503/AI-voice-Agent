@@ -20,14 +20,13 @@ MANIFEST = HERE / "manifest.json"
 
 
 async def synth_one(client, voice_id: str, text: str, out_path: Path) -> None:
-    stream = await client.tts_realtime(  # type: ignore[attr-defined]
-        voice_id=voice_id,
-        output_format="pcm",
-        close_ws_on_eos=True,
-    )
-    await stream.send_text(text)
+    """Use gradium 0.5.11's tts_stream() — simpler API for batch synthesis
+    than tts_realtime().  Returns a stream whose .iter_bytes() yields PCM."""
+    from gradium import TTSSetup  # type: ignore
+    setup = TTSSetup(voice_id=voice_id, output_format="pcm")  # type: ignore[call-arg]
+    stream = await client.tts_stream(setup, text)  # type: ignore[attr-defined]
     chunks: list[bytes] = []
-    async for audio in stream:
+    async for audio in stream.iter_bytes():
         chunks.append(audio)
     out_path.write_bytes(b"".join(chunks))
 
@@ -47,7 +46,7 @@ async def main() -> None:
 
     AUDIO.mkdir(parents=True, exist_ok=True)
     manifest = json.loads(MANIFEST.read_text())
-    client = gradium.AsyncClient(api_key=api_key)  # type: ignore[attr-defined]
+    client = gradium.GradiumClient(api_key=api_key)  # type: ignore[attr-defined]
 
     total = sum(len(items) for items in manifest["categories"].values())
     done = 0

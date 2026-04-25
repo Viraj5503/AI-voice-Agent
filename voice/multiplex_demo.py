@@ -37,7 +37,8 @@ async def main() -> None:
         print("Set GRADIUM_API_KEY (and ideally GRADIUM_VOICE_ID).")
         sys.exit(2)
 
-    client = gradium.AsyncClient(api_key=api_key)  # type: ignore[attr-defined]
+    # gradium 0.5.11 surface: GradiumClient (sync ctor, async methods).
+    client = gradium.GradiumClient(api_key=api_key)  # type: ignore[attr-defined]
 
     async def synth(idx: int, text: str) -> None:
         req_id = f"jamie-stream-{idx}"
@@ -50,7 +51,9 @@ async def main() -> None:
             )
             await stream.send_text(text)
             total_bytes = 0
-            async for audio in stream:
+            # gradium 0.5.11 streams via .iter_bytes() on the returned stream
+            iter_audio = getattr(stream, "iter_bytes", None) or stream.__aiter__
+            async for audio in iter_audio() if callable(iter_audio) else stream:
                 total_bytes += len(audio)
             print(f"[{req_id}] received {total_bytes} bytes for: {text[:42]}...")
         except Exception as e:

@@ -6,19 +6,20 @@ Jamie is a phone-based first-notice-of-loss (FNOL) claims intake specialist for 
 
 ## Architecture (one sentence)
 
-`Inbound call → Gradium STT → Gemini 3 Flash (with Known-Context CRM + Tavily tools) → Gradium TTS → Caller`, while in parallel `transcript → fastino/gliner2-base-v1 → 15 claim pillars + 5 fraud signals → WebSocket → Lovable dashboard`.
+`Inbound call → Gradium STT → Gemini 2.5 Flash (with Known-Context CRM + Tavily tools) → Gradium TTS → Caller`, while in parallel `transcript → fastino/gliner2-base-v1 → 15 claim pillars + 5 fraud signals → WebSocket → Lovable dashboard`.
 
 ## Stack — verified facts (April 2026)
 
-The original game plan contained a few hopeful claims that turned out not to match the actual docs. Corrected here so nothing breaks at H22:
+The original game plan and the first round of stack research both contained hopeful claims that turned out not to match the actual docs / API responses. Corrected here so nothing breaks at H22:
 
-| Claim in plan | Reality | What we use |
+| Claim | Reality | What we use |
 |---|---|---|
-| Gemini 2.0 Flash | Gemini 3 Flash launched 22 Apr 2026; "2.0" no longer current | `gemini-3-flash` via `google-genai` |
-| `knowledgator/gliner-multitask-large-v0.5` | Not the current ID | `fastino/gliner2-base-v1` (Pioneer-eligible) with `knowledgator/gliner-bi-large-v2.0` fallback |
+| `gemini-3-flash` is the latency-optimized public model | A live 404 from `models/gemini-3-flash` proves it isn't on the public v1beta endpoint yet | `gemini-2.5-flash`, with auto-probe fallback to `2.0-flash` and `1.5-flash` |
+| `knowledgator/gliner-multitask-large-v0.5` is current | That exact ID isn't current on HF | `fastino/gliner2-base-v1` (Pioneer-aligned) with `knowledgator/gliner-bi-large-v2.0` fallback |
+| `gradium.AsyncClient` / `gradium.Client` exist | Neither — the `gradium` 0.5.11 package exports `GradiumClient` | `from gradium import GradiumClient` (sync ctor, async `tts_stream` / `tts_realtime`) |
 | `<flush>` / `<break time="…"/>` SSML tags | Not documented in gradium.ai | Stick to documented `speed` / `temperature`; treat tags as best-effort |
-| `entire dispatch` | Only `entire enable` is documented | Use `entire enable`; treat dispatch as optional |
-| `GradiumTTSService` class | Real class is `gradium.TTS()` | `from livekit.plugins import gradium; gradium.TTS()` |
+| `entire dispatch` | Confirmed real (user has used it) on top of `entire enable` | `entire enable` then `entire dispatch` for reasoning capture |
+| `GradiumTTSService` class in livekit | Real class is `gradium.TTS()` | `from livekit.plugins import gradium; gradium.TTS()` |
 | `pip install gradium` (only) | Multiple paths exist | Prototype with `gradbot`, ship with `livekit-agents[gradium]` |
 
 ## Repo layout
@@ -37,6 +38,10 @@ fillers/       Filler-audio manifest + generation script
 docs/          SECURITY.md (Aikido), ENTIRE.md, prompts cookbook
 scripts/       run_demo_text.py and other operator commands
 ```
+
+## Sequential build path
+
+If you're standing this up from scratch, follow **[docs/SEQUENTIAL_RUNBOOK.md](docs/SEQUENTIAL_RUNBOOK.md)** in order: LiveKit → Gradium → Gemini → Twilio (skip for laptop-mic demo) → Tavily → Fastino → Aikido + Entire. Each step has a one-line checkpoint you have to hit before moving on, so you never debug a broken layer through the layer above it.
 
 ## Quickstart (text-mode, no telephony, no API keys yet)
 
