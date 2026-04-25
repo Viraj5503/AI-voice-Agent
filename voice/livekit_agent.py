@@ -49,7 +49,12 @@ from bridge.client import publish as bridge_publish
 # "Plugins must be registered on the main thread". So we import top-level here.
 # Wrapped in try/except for CI boxes that don't have the optional voice deps.
 try:
-    from livekit.agents import AgentSession, Agent, function_tool
+    from livekit.agents import (
+        AgentSession,
+        Agent,
+        AutoSubscribe,
+        function_tool,
+    )
     from livekit.agents.llm import ChatContext
     from livekit.plugins import gradium as lk_gradium
     from livekit.plugins import google as lk_google
@@ -313,8 +318,16 @@ def build_agent(crm: dict, state: ClaimState):
 
 # --------------------------------------------------------------------------
 async def entrypoint(ctx) -> None:  # type: ignore[no-untyped-def]
-    """LiveKit-agents entrypoint — invoked once per dispatched job."""
-    await ctx.connect()
+    """LiveKit-agents entrypoint — invoked once per dispatched job.
+
+    auto_subscribe=AUDIO_ONLY matters for telephony.  When a Twilio SIP
+    call lands in a LiveKit room via the inbound trunk, only audio
+    tracks exist — subscribing to the default (all tracks) makes the
+    agent wait on phantom video tracks that never arrive.  Audio-only
+    keeps console mode + LiveKit Cloud playground working too (their
+    rooms also have no video).
+    """
+    await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     crm_name = os.environ.get("DEMO_CRM_PROFILE", "max_mueller")
     crm = load_crm(crm_name)

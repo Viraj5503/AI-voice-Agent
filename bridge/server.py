@@ -25,7 +25,7 @@ from typing import Any, Set
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, Response
 
 
 app = FastAPI(title="Turing Adjuster — bridge")
@@ -87,6 +87,49 @@ async def root() -> str:
 @app.get("/health")
 async def health() -> dict[str, Any]:
     return {"ok": True, "clients": len(hub._clients), "events": len(hub._history)}
+
+
+@app.api_route("/twiml", methods=["GET", "POST"])
+async def twiml() -> Response:
+    """TwiML payload that Twilio fetches when our number rings.
+
+    Returns <Dial><Sip>...</Sip></Dial> pointing at the LiveKit project's
+    SIP gateway.  Twilio takes the inbound PSTN call and forwards it as a
+    SIP INVITE to LiveKit, which matches the "jamie-inbound" trunk and
+    creates a room our agent worker auto-joins.
+
+    Setup steps when Inca fixes the Twilio API key:
+      1. Run this bridge:  python -m bridge.server
+      2. Expose to public internet:  ngrok http 8765
+      3. TWIML_URL=https://<ngrok-id>.ngrok-free.app/twiml \\
+           python telephony/configure_twilio.py apply
+
+    Twilio always POSTs to voice URLs but accepts GET as fallback.  We
+    answer both so a curl test works too.
+    """
+    sip_uri = os.environ.get("LIVEKIT_SIP_URI")
+    if not sip_uri:
+        # Derive from LIVEKIT_URL (wss://<project>.<region>.livekit.cloud)
+        lk_url = os.environ.get("LIVEKIT_URL", "")
+        host = lk_url.replace("wss://", "").replace("ws://", "").rstrip("/")
+        project = host.split(".")[0]
+        sip_uri = f"sip:{project}.sip.livekit.cloud" if project else ""
+    if not sip_uri:
+        return Response(
+            content=(
+                '<?xml version="1.0" encoding="UTF-8"?>\n'
+                "<Response><Say>Configuration error: no LiveKit SIP URI</Say></Response>"
+            ),
+            media_type="application/xml",
+            status_code=500,
+        )
+    payload = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        "<Response>\n"
+        f"  <Dial><Sip>{sip_uri}</Sip></Dial>\n"
+        "</Response>\n"
+    )
+    return Response(content=payload, media_type="application/xml")
 
 
 @app.post("/publish")
