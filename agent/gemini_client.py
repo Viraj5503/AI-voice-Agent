@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import os
 import random
+import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -35,6 +36,17 @@ except Exception:  # pragma: no cover - graceful degradation
 # elsewhere; (b) Google silently deprecates pinned versions ("This model is
 # no longer available to new users" — observed live on gemini-2.0-flash).
 DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
+
+# Each model has its OWN per-day and per-minute quota bucket.  When we've
+# hammered one model and it 429s persistently, rotating to a different
+# model usually works.  Order: cheapest/fastest first.
+_FALLBACK_MODELS = [
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-pro-latest",
+    "gemini-2.5-pro",
+]
 
 
 class GeminiBrain:
@@ -86,58 +98,109 @@ class GeminiBrain:
             temperature=0.85,
         )
 
-        # google-genai 1.73.x: aio.models.generate_content_stream is an
-        # async function that returns an AsyncIterator.  Confirmed by
-        # introspection (iscoroutinefunction=True, returns AsyncIterator).
-        # Must `await` first, then `async for` over the result.
+        # google-genai 1.73.x: aio.models.generate_content_stream is an async
+        # function that returns an AsyncIterator (introspected — must await).
         #
-        # Backoff schedule for free-tier 429s: 2s, 6s, 14s, 30s (sum 52s).
-        # Free tier RPM resets every minute, so this nearly always covers it.
-        # Per-attempt jitter avoids thundering-herd if multiple turns retry.
+        # Resilience strategy, in order:
+        #  1. Backoff on the configured model: 2s, 6s, 14s.  Free-tier RPM
+        #     resets per minute so ~22s of waiting handles transient bursts.
+        #  2. If still 429 after that, ROTATE to a different model.  Each
+        #     model has its own per-minute and per-day quota bucket, so a
+        #     daily-quota exhaustion on gemini-flash-latest doesn't block
+        #     gemini-2.5-flash etc.
+        #  3. If every fallback also 429s, raise with a clear message so
+        #     the caller can show it (we no longer hide errors as bare
+        #     "ClientError" strings).
+        #
+        # Per-attempt logging: each retry prints to stderr so the user sees
+        # what's happening instead of staring at a hung terminal.
+
+        BACKOFFS = (2.0, 6.0, 14.0)
         last_err: Exception | None = None
-        BACKOFFS = (2.0, 6.0, 14.0, 30.0)
-        for attempt, base in enumerate(BACKOFFS + (None,)):
-            try:
-                stream = await self._client.aio.models.generate_content_stream(
-                    model=self.model_name,
-                    contents=contents,
-                    config=config,
-                )
-                got_any = False
-                async for chunk in stream:
-                    text = getattr(chunk, "text", None)
-                    if text:
-                        got_any = True
-                        yield text
-                if got_any:
-                    return
-                # empty stream — treat as transient, retry once if we can
-                if base is None:
-                    return
-                await asyncio.sleep(base + random.uniform(0, 0.5))
-                continue
-            except Exception as e:
-                last_err = e
-                msg = str(e)
-                rate_limited = (
-                    "429" in msg or "RESOURCE_EXHAUSTED" in msg
-                    or "503" in msg or "UNAVAILABLE" in msg
-                )
-                if rate_limited and base is not None:
-                    delay = base + random.uniform(0, 0.5)
-                    await asyncio.sleep(delay)
-                    continue
-                # other errors (auth, model-not-found, bad request) fail fast
-                raise
-        # All retries exhausted — yield a graceful filler so the demo
-        # doesn't dead-air.  This is still better than crashing the call.
+
+        # Build the model rotation: configured model first, then fallbacks
+        # we haven't already tried.
+        rotation: list[str] = [self.model_name]
+        for m in _FALLBACK_MODELS:
+            if m and m not in rotation:
+                rotation.append(m)
+
+        for model_idx, model in enumerate(rotation):
+            for attempt, base in enumerate(BACKOFFS):
+                try:
+                    stream = await self._client.aio.models.generate_content_stream(
+                        model=model,
+                        contents=contents,
+                        config=config,
+                    )
+                    got_any = False
+                    async for chunk in stream:
+                        text = getattr(chunk, "text", None)
+                        if text:
+                            got_any = True
+                            yield text
+                    if got_any:
+                        if model != self.model_name:
+                            print(
+                                f"  [gemini] success on fallback model {model!r} "
+                                f"(your configured {self.model_name!r} was throttled)",
+                                file=sys.stderr,
+                            )
+                        return
+                    # empty stream — rare; treat as transient
+                    if attempt < len(BACKOFFS) - 1:
+                        await asyncio.sleep(base + random.uniform(0, 0.4))
+                        continue
+                    break  # try next model
+                except Exception as e:
+                    last_err = e
+                    short = str(e).split("\n")[0][:160]
+                    rate_limited = (
+                        "429" in short or "RESOURCE_EXHAUSTED" in short
+                        or "503" in short or "UNAVAILABLE" in short
+                    )
+                    if rate_limited:
+                        if attempt < len(BACKOFFS) - 1:
+                            delay = base + random.uniform(0, 0.4)
+                            print(
+                                f"  [gemini] {model} rate-limited "
+                                f"(attempt {attempt + 1}/{len(BACKOFFS)}); "
+                                f"retrying in {delay:.1f}s.  Detail: {short}",
+                                file=sys.stderr,
+                            )
+                            await asyncio.sleep(delay)
+                            continue
+                        # last attempt on this model — fall through to next
+                        if model_idx < len(rotation) - 1:
+                            print(
+                                f"  [gemini] {model} exhausted; rotating to "
+                                f"{rotation[model_idx + 1]!r}",
+                                file=sys.stderr,
+                            )
+                        break
+                    # non-rate-limit error: don't retry, fail loud
+                    print(
+                        f"  [gemini] non-retryable error on {model}: {short}",
+                        file=sys.stderr,
+                    )
+                    raise
+
+        # All models / all retries exhausted.  Yield a graceful filler so
+        # the call doesn't dead-air, then surface the real error in the
+        # raised exception (callers should print str(exc), not type(exc)).
         yield (
             "Sorry, my system is being a bit slow today — "
             "give me just a second and I'll pull that up."
         )
+        msg = (
+            "all Gemini models exhausted (rate limit / daily quota).  "
+            "Wait a few minutes, run scripts/diagnose_gemini.py to see "
+            "which models still work, or upgrade quota at "
+            "https://aistudio.google.com/app/usage"
+        )
         if last_err:
-            # Re-raise so the caller can log; the filler above already played.
-            raise last_err
+            raise RuntimeError(f"{msg}.  Last error: {last_err}") from last_err
+        raise RuntimeError(msg)
 
 
 # ----- stub fallback -------------------------------------------------------

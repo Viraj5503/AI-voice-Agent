@@ -31,8 +31,12 @@ import json
 import os
 import sys
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+
+
+def _utc_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
@@ -135,7 +139,7 @@ async def run_scenario(scenario_path: Path, pace: str, no_bridge: bool) -> Path:
 
     async def speak(speaker: str, text: str) -> None:
         transcript.append({"speaker": speaker, "text": text,
-                           "ts": datetime.utcnow().isoformat() + "Z"})
+                           "ts": _utc_iso()})
         color = Term.BLUE if speaker == "jamie" else Term.YELLOW
         print(f"\n  {color}{Term.BOLD}{speaker.upper():6}{Term.END} {color}{text}{Term.END}")
         await emit({"type": "transcript", "speaker": speaker,
@@ -208,9 +212,13 @@ async def run_scenario(scenario_path: Path, pace: str, no_bridge: bool) -> Path:
             async for piece in brain.stream_reply(sys_prompt, history[:-1], caller_text):
                 chunks.append(piece)
         except Exception as e:
-            print(f"  {Term.RED}[mid-turn brain error: {type(e).__name__}]{Term.END}")
+            # Print the FULL error message — type alone isn't actionable.
+            full = f"{type(e).__name__}: {e}"
+            print(f"  {Term.RED}[mid-turn brain error] {full[:300]}{Term.END}")
             if not chunks:
-                chunks = [f"(Jamie's brain failed mid-turn: {type(e).__name__})"]
+                chunks = [
+                    "Sorry — my system just hiccuped, can you give me one moment?"
+                ]
         reply = ("".join(chunks)).strip() or "(silence — model returned nothing)"
         await speak("jamie", reply)
         history.append({"role": "model", "text": reply})
@@ -235,7 +243,7 @@ async def run_scenario(scenario_path: Path, pace: str, no_bridge: bool) -> Path:
 
     # Persist transcript + claim JSON to a timestamped file
     TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
-    out_path = TRANSCRIPT_DIR / f"{scenario['name']}_{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}.json"
+    out_path = TRANSCRIPT_DIR / f"{scenario['name']}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.json"
     out_path.write_text(json.dumps({
         "scenario": scenario,
         "crm_profile": crm_name,
