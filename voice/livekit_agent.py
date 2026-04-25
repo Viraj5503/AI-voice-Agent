@@ -44,6 +44,21 @@ from agent.pii_redact import redact
 from extraction.gliner2_service import ExtractionService
 from bridge.client import publish as bridge_publish
 
+# livekit-agents requires plugins to register on the MAIN thread. Lazy-importing
+# inside build_session() runs in a worker subprocess thread and fails with
+# "Plugins must be registered on the main thread". So we import top-level here.
+# Wrapped in try/except for CI boxes that don't have the optional voice deps.
+try:
+    from livekit.agents import AgentSession, Agent, function_tool
+    from livekit.agents.llm import ChatContext
+    from livekit.plugins import gradium as lk_gradium
+    from livekit.plugins import google as lk_google
+    from livekit.plugins import silero as lk_silero
+    _VOICE_DEPS = True
+except Exception as _voice_import_error:  # noqa: BLE001
+    _VOICE_DEPS = False
+    _voice_import_msg = str(_voice_import_error)
+
 
 def load_crm(name: str) -> dict:
     return json.loads((REPO / "data" / "crm" / f"{name}.json").read_text(encoding="utf-8"))
@@ -51,35 +66,25 @@ def load_crm(name: str) -> dict:
 
 # --------------------------------------------------------------------------
 def build_session(crm: dict, state: ClaimState):
-    """Construct an AgentSession with Gradium voice + native Gemini brain.
-
-    Imports live inside the function so this module stays import-safe even
-    if the optional voice deps aren't installed (e.g. on a CI box).
-    """
-    from livekit.agents import AgentSession
-    from livekit.plugins import gradium, google as lk_google, silero
-
+    """Construct an AgentSession with Gradium voice + native Gemini brain."""
     # GRADIUM_VOICE_ID falls through to the plugin's documented default
     # (YTpq7expH9539ERJ — flagship "Emma") when unset.
     voice_id = os.environ.get("GRADIUM_VOICE_ID") or None
 
     return AgentSession(
-        stt=gradium.STT(),
+        stt=lk_gradium.STT(),
         llm=lk_google.LLM(
             model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
             temperature=0.85,
         ),
-        tts=gradium.TTS(voice_id=voice_id) if voice_id else gradium.TTS(),
-        vad=silero.VAD.load(),
+        tts=lk_gradium.TTS(voice_id=voice_id) if voice_id else lk_gradium.TTS(),
+        vad=lk_silero.VAD.load(),
     )
 
 
 def build_agent(crm: dict, state: ClaimState):
     """The Agent subclass holds Jamie's persona + the on_user_turn_completed
     hook that forks transcripts to GLiNER2 + the dashboard bridge."""
-    from livekit.agents import Agent
-    from livekit.agents.llm import ChatContext
-
     extractor = ExtractionService()
 
     class JamieAgent(Agent):
@@ -94,6 +99,43 @@ def build_agent(crm: dict, state: ClaimState):
             await bridge_publish({"type": "call_start", "crm": crm})
             # Speak the opening line immediately
             await self.session.say(opening_line(crm))
+
+        @function_tool
+        async def lookup_weather(self, location: str) -> str:
+            """Look up the current weather and road conditions at the given
+            location. Call this immediately after the caller mentions where
+            the accident happened so you can reference real conditions."""
+            from tools.tavily_lookup import lookup_weather as _lw
+            await bridge_publish({
+                "type": "tool_call",
+                "name": "tavily_lookup_weather",
+                "args": {"location": location},
+            })
+            result = await asyncio.to_thread(_lw, location)
+            await bridge_publish({
+                "type": "tool_result",
+                "name": "tavily_lookup_weather",
+                "result": result,
+            })
+            return result.get("summary") or "(no weather data)"
+
+        @function_tool
+        async def lookup_towing(self, location: str) -> str:
+            """Find 24-hour towing services (Abschleppdienst) near an accident
+            location. Use when the caller's vehicle is not drivable."""
+            from tools.tavily_lookup import lookup_towing as _lt
+            await bridge_publish({
+                "type": "tool_call",
+                "name": "tavily_lookup_towing",
+                "args": {"location": location},
+            })
+            result = await asyncio.to_thread(_lt, location)
+            await bridge_publish({
+                "type": "tool_result",
+                "name": "tavily_lookup_towing",
+                "result": result,
+            })
+            return result.get("summary") or "(no towing data)"
 
         async def on_user_turn_completed(  # type: ignore[override]
             self,
@@ -159,19 +201,36 @@ async def entrypoint(ctx) -> None:  # type: ignore[no-untyped-def]
     session = build_session(crm, state)
     agent = build_agent(crm, state)
 
+    # Publish Jamie's spoken responses to the dashboard.  on_user_turn_completed
+    # already covers the caller side; the conversation_item_added event fires
+    # for both roles, so we filter to 'assistant' here to avoid double-publish.
+    def _on_item_added(ev) -> None:  # type: ignore[no-untyped-def]
+        item = getattr(ev, "item", None)
+        if item is None or getattr(item, "role", None) != "assistant":
+            return
+        text = (item.text_content or "").strip()
+        if not text:
+            return
+        asyncio.create_task(bridge_publish({
+            "type": "transcript",
+            "speaker": "jamie",
+            "text": text,
+        }))
+
+    session.on("conversation_item_added", _on_item_added)
+
     await session.start(agent=agent, room=ctx.room)
 
 
 def main() -> None:
-    try:
-        from livekit.agents import WorkerOptions, cli
-    except Exception as e:
+    if not _VOICE_DEPS:
         print(
             "livekit-agents not installed.\n\n"
             "    pip install \"livekit-agents[gradium,google,silero]>=1.4,<2.0\"\n\n"
-            f"(import error: {e})"
+            f"(import error: {_voice_import_msg})"
         )
         sys.exit(2)
+    from livekit.agents import WorkerOptions, cli
     cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
 
 
