@@ -28,9 +28,13 @@ except Exception:  # pragma: no cover - graceful degradation
     _HAVE_GENAI = False
 
 
-# gemini-3-flash isn't on the public v1beta endpoint as of April 2026 — fall
-# back to gemini-2.5-flash, which is the actual latency-optimized model.
-DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+# gemini-flash-latest is a Google-maintained alias that always routes to the
+# current best public Flash model.  Two reasons we prefer the alias over a
+# pinned version: (a) per-model rate limits hot-spot — when you're 429-d on
+# gemini-2.5-flash you're often still fine on the alias because it routes
+# elsewhere; (b) Google silently deprecates pinned versions ("This model is
+# no longer available to new users" — observed live on gemini-2.0-flash).
+DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-flash-latest")
 
 
 class GeminiBrain:

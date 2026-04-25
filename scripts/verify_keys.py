@@ -48,11 +48,18 @@ def _skip(name: str, msg: str) -> None:
 # --------------------------------------------------------------
 # Probed in order — first one that responds wins.  Update .env's
 # GEMINI_MODEL to whichever the verifier picks.
+#
+# Order rationale:
+#   1. whatever the user has in .env (respect explicit choice)
+#   2. gemini-flash-latest — Google's rolling alias, dodges per-model 429
+#      hot-spotting and won't get hit by silent deprecations
+#   3. gemini-2.5-flash — the current pinned Flash version
+#   4. gemini-2.5-pro — pro-tier fallback if Flash is throttled
 GEMINI_CANDIDATES = [
-    os.environ.get("GEMINI_MODEL"),   # whatever the user has in .env
-    "gemini-2.5-flash",                # current latency-optimized public model
-    "gemini-2.0-flash",                # stable fallback
-    "gemini-1.5-flash",                # last-resort
+    os.environ.get("GEMINI_MODEL"),
+    "gemini-flash-latest",
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
 ]
 
 
@@ -69,10 +76,10 @@ async def check_gemini() -> bool:
         return False
 
     client = genai.Client(api_key=key)
-    last_err: Exception | None = None
-    for candidate in GEMINI_CANDIDATES:
-        if not candidate:
-            continue
+    errors: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    candidates = [c for c in GEMINI_CANDIDATES if c and c not in seen and not seen.add(c)]
+    for candidate in candidates:
         try:
             resp = client.models.generate_content(
                 model=candidate,
@@ -80,19 +87,24 @@ async def check_gemini() -> bool:
                 config=types.GenerateContentConfig(temperature=0.0, max_output_tokens=10),
             )
             text = (getattr(resp, "text", "") or "").strip()
-            if "OK" in text.upper():
-                _ok("Gemini", f"{candidate} works → {text!r}")
-                if candidate != os.environ.get("GEMINI_MODEL"):
-                    print(f"    (tip: set GEMINI_MODEL={candidate} in .env to lock it in)")
-                return True
-            # responded but didn't say OK — still counts as working access
-            _ok("Gemini", f"{candidate} reachable (got {text!r})")
+            _ok("Gemini", f"{candidate} works → {text!r}")
+            if candidate != os.environ.get("GEMINI_MODEL"):
+                print(f"    (tip: set GEMINI_MODEL={candidate} in .env to lock it in)")
             return True
         except Exception as e:
-            last_err = e
+            short = str(e).split("\n")[0][:90]
+            errors.append((candidate, f"{type(e).__name__}: {short}"))
             continue
-    _fail("Gemini", f"none of {[c for c in GEMINI_CANDIDATES if c]} worked. "
-                    f"Last error: {type(last_err).__name__}: {last_err}")
+    _fail("Gemini", "all candidates failed — full per-attempt errors:")
+    for cand, err in errors:
+        print(f"        · {cand:24}  {err}")
+    if any("429" in e or "RESOURCE_EXHAUSTED" in e or "rate" in e.lower()
+           for _, e in errors):
+        print("        → rate-limited.  Wait ~60s and retry, or run:")
+        print("           python scripts/diagnose_gemini.py")
+    else:
+        print("        → run:  python scripts/diagnose_gemini.py")
+        print("          (it lists which models your key actually has access to)")
     return False
 
 
@@ -198,11 +210,17 @@ async def main() -> None:
     total_attempted = sum(1 for r in results if r is not False or True)  # cosmetic
     print(f"\n  {GREEN if passed else RED}{passed} key(s) healthy{END}\n")
 
-    # Hint the next step
-    if results[0]:  # Gemini
+    # Hint the next step based on actual state, not just the Gemini result
+    has_key = bool(os.environ.get("GOOGLE_API_KEY"))
+    if results[0]:  # Gemini works
         print("  Next:  python scripts/run_demo_text.py --crm max_mueller\n")
+    elif has_key:
+        print("  Next:  python scripts/diagnose_gemini.py")
+        print("         (lists which Gemini models your key has access to,")
+        print("         and shows the real error per probe — verify_keys is")
+        print("         brief by design.)\n")
     else:
-        print("  Next:  add GOOGLE_API_KEY to .env, re-run this script.\n")
+        print("  Next:  add GOOGLE_API_KEY to .env, re-run.\n")
 
 
 if __name__ == "__main__":
