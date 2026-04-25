@@ -40,11 +40,15 @@ class GeminiBrain:
     ) -> None:
         self.model_name = model or DEFAULT_MODEL
         self.api_key = api_key or os.environ.get("GOOGLE_API_KEY")
+        # Tools wiring is intentionally deferred for the text demo.  The
+        # voice loop in voice/livekit_agent.py adds Tavily callables here
+        # once we have the function-calling round-trip working.
         self.tools = tools or []
         self._real = bool(self.api_key) and _HAVE_GENAI
         self._client: Any = None
         if self._real:
-            # google-genai picks up GOOGLE_API_KEY from env automatically
+            # google-genai picks up GOOGLE_API_KEY from env automatically,
+            # but we pass it explicitly so .env-loaded keys win over shell.
             self._client = genai.Client(api_key=self.api_key)
 
     # --------------------------------------------------------------
@@ -66,15 +70,17 @@ class GeminiBrain:
             contents.append(types.Content(role=role, parts=[types.Part(text=turn["text"])]))
         contents.append(types.Content(role="user", parts=[types.Part(text=user_message)]))
 
+        # NOTE: we deliberately do NOT pass tools here for the text demo;
+        # mid-stream function-call handling needs a request/response loop
+        # that's wired in voice/livekit_agent.py for the production stack.
         config = types.GenerateContentConfig(
             system_instruction=system_prompt,
             temperature=0.85,
-            tools=self.tools or None,
-            response_modalities=["TEXT"],
         )
 
-        # google-genai exposes both sync and async streaming; we use async.
-        stream = await self._client.aio.models.generate_content_stream(
+        # google-genai 1.73.x: aio.models.generate_content_stream is an
+        # async generator (NOT a coroutine).  Iterate directly.
+        stream = self._client.aio.models.generate_content_stream(
             model=self.model_name,
             contents=contents,
             config=config,
