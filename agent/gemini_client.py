@@ -12,7 +12,9 @@ path.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import random
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -81,16 +83,41 @@ class GeminiBrain:
         )
 
         # google-genai 1.73.x: aio.models.generate_content_stream is an
-        # async generator (NOT a coroutine).  Iterate directly.
-        stream = self._client.aio.models.generate_content_stream(
-            model=self.model_name,
-            contents=contents,
-            config=config,
-        )
-        async for chunk in stream:
-            text = getattr(chunk, "text", None)
-            if text:
-                yield text
+        # async function that returns an AsyncIterator.  Confirmed by
+        # introspection (iscoroutinefunction=True, returns AsyncIterator).
+        # Must `await` first, then `async for` over the result.
+        #
+        # We wrap with a small retry loop because Gemini's free tier has a
+        # tight RPM cap that's easy to brush in a real call.  Backoff is
+        # cheap; failing the demo isn't.
+        last_err: Exception | None = None
+        for attempt in range(4):
+            try:
+                stream = await self._client.aio.models.generate_content_stream(
+                    model=self.model_name,
+                    contents=contents,
+                    config=config,
+                )
+                async for chunk in stream:
+                    text = getattr(chunk, "text", None)
+                    if text:
+                        yield text
+                return
+            except Exception as e:
+                last_err = e
+                msg = str(e)
+                # 429 = rate limit, 503 = backend overload — both worth retrying.
+                if "429" in msg or "RESOURCE_EXHAUSTED" in msg or "503" in msg or "UNAVAILABLE" in msg:
+                    delay = (2 ** attempt) + random.uniform(0, 0.4)
+                    await asyncio.sleep(delay)
+                    continue
+                # other errors (auth, model-not-found, bad request) fail fast
+                raise
+        # exhausted all retries — fall back to a brief filler so the demo
+        # doesn't dead-air.  Better to look human-imperfect than to crash.
+        yield "Sorry, just one second — my system is being a bit slow…"
+        if last_err:
+            raise last_err
 
 
 # ----- stub fallback -------------------------------------------------------

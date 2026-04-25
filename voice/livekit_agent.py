@@ -1,141 +1,178 @@
-"""Production voice agent: LiveKit Agents + Gradium TTS + Gemini brain.
+"""Production voice agent — LiveKit + Gradium STT/TTS + native Gemini LLM.
 
-This is the stack we point Twilio SIP at for the live demo.  It uses the
-documented pieces:
+Verified against the actual installed packages:
+    livekit-agents 1.5.6
+    livekit-plugins-gradium 1.5.6
+    livekit-plugins-google 1.5.6
+    livekit-plugins-silero 1.5.6   (VAD)
 
-    pip install "livekit-agents[gradium]~=1.4"
-    from livekit.plugins import gradium
-    tts = gradium.TTS(voice_id=...)
+The hook surface in livekit-agents 1.5 is:
+    Agent.on_enter / on_exit / on_user_turn_completed
+    NOT on_user_message — that doesn't exist.
 
-A Gemini 3 Flash chat client (`agent.gemini_client.GeminiBrain`) drives the
-turns; transcript fragments are forked off to the GLiNER2 extractor and the
-WebSocket bridge.
+We use livekit.plugins.google.LLM directly instead of wrapping our custom
+GeminiBrain — the text demo keeps using GeminiBrain because it doesn't need
+the AgentSession pipeline; the voice path uses the native plugin so we get
+proper turn handling, streaming, tool calling, and barge-in for free.
 
-If the optional packages are missing we exit with a clear setup hint.
+Run:
+    pip install "livekit-agents[gradium,google,silero]>=1.4,<2.0"
+    python voice/livekit_agent.py dev    # local dev mode
+    python voice/livekit_agent.py start  # production worker
 """
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import os
 import sys
 from pathlib import Path
-from typing import Any
 
 REPO = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO))
 
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(REPO / ".env")
+except Exception:
+    pass
+
 from agent.claim_state import ClaimState
 from agent.prompts import build_jamie_system_prompt, opening_line
-from agent.gemini_client import GeminiBrain
 from agent.pii_redact import redact
 from extraction.gliner2_service import ExtractionService
 from bridge.client import publish as bridge_publish
-from tools.tavily_lookup import DISPATCH as TAVILY_DISPATCH, GEMINI_TOOL_DECLS
 
 
 def load_crm(name: str) -> dict:
-    path = REPO / "data" / "crm" / f"{name}.json"
-    return json.loads(path.read_text(encoding="utf-8"))
+    return json.loads((REPO / "data" / "crm" / f"{name}.json").read_text(encoding="utf-8"))
 
 
-async def _emit_transcript(speaker: str, text: str) -> None:
-    await bridge_publish({
-        "type": "transcript",
-        "speaker": speaker,
-        "text": redact(text),
-    })
+# --------------------------------------------------------------------------
+def build_session(crm: dict, state: ClaimState):
+    """Construct an AgentSession with Gradium voice + native Gemini brain.
+
+    Imports live inside the function so this module stays import-safe even
+    if the optional voice deps aren't installed (e.g. on a CI box).
+    """
+    from livekit.agents import AgentSession
+    from livekit.plugins import gradium, google as lk_google, silero
+
+    # GRADIUM_VOICE_ID falls through to the plugin's documented default
+    # (YTpq7expH9539ERJ — flagship "Emma") when unset.
+    voice_id = os.environ.get("GRADIUM_VOICE_ID") or None
+
+    return AgentSession(
+        stt=gradium.STT(),
+        llm=lk_google.LLM(
+            model=os.environ.get("GEMINI_MODEL", "gemini-2.5-flash"),
+            temperature=0.85,
+        ),
+        tts=gradium.TTS(voice_id=voice_id) if voice_id else gradium.TTS(),
+        vad=silero.VAD.load(),
+    )
 
 
-async def _emit_extraction(state: ClaimState, text: str, extractor: ExtractionService) -> None:
-    """Run the extractor in a thread, push entities to the bridge + state."""
-    out = await asyncio.to_thread(extractor.extract, text)
-    for label, info in out["pillars"].items():
-        state.fill(label, info["text"], confidence=info["score"])
-        await bridge_publish({
-            "type": "entity",
-            "label": label,
-            "value": info["text"],
-            "confidence": info["score"],
-        })
-    for label, info in out["fraud"].items():
-        state.flag_fraud(label, info["text"], severity="medium")
-        await bridge_publish({
-            "type": "fraud_signal",
-            "signal": label,
-            "severity": "medium",
-            "evidence": info["text"],
-        })
+def build_agent(crm: dict, state: ClaimState):
+    """The Agent subclass holds Jamie's persona + the on_user_turn_completed
+    hook that forks transcripts to GLiNER2 + the dashboard bridge."""
+    from livekit.agents import Agent
+    from livekit.agents.llm import ChatContext
 
-
-async def run_agent(crm_name: str) -> None:
-    try:
-        from livekit import agents  # type: ignore  # noqa: F401
-        from livekit.agents import (  # type: ignore
-            AgentSession,
-            Agent,
-            JobContext,
-            WorkerOptions,
-            cli,
-        )
-        from livekit.plugins import gradium  # type: ignore
-    except Exception as e:
-        print(
-            "livekit-agents[gradium] not installed.\n\n"
-            "    pip install \"livekit-agents[gradium]~=1.4\"\n\n"
-            f"(import error: {e})"
-        )
-        sys.exit(2)
-
-    crm = load_crm(crm_name)
-    state = ClaimState(call_id=f"lk-{crm_name}")
     extractor = ExtractionService()
-    brain = GeminiBrain(tools=GEMINI_TOOL_DECLS)
 
-    voice_id = os.environ.get("GRADIUM_VOICE_ID")
-    tts = gradium.TTS(voice_id=voice_id) if voice_id else gradium.TTS()
-    # Use Gradium STT if exposed by the plugin; otherwise rely on LK's default.
-    stt = getattr(gradium, "STT", None)
-    stt_inst = stt() if stt else None
-
-    class JamieAgent(Agent):  # type: ignore[misc]
+    class JamieAgent(Agent):
         def __init__(self) -> None:
-            super().__init__(instructions=build_jamie_system_prompt(crm, state))
+            super().__init__(
+                instructions=build_jamie_system_prompt(crm, state),
+            )
 
-        async def on_user_message(self, msg: str) -> str:  # pragma: no cover - integration
-            await _emit_transcript("caller", msg)
-            asyncio.create_task(_emit_extraction(state, msg, extractor))
+        async def on_enter(self) -> None:  # type: ignore[override]
+            # Push a call_start event with the full CRM so the dashboard
+            # populates its Known Context panel before the first word.
+            await bridge_publish({"type": "call_start", "crm": crm})
+            # Speak the opening line immediately
+            await self.session.say(opening_line(crm))
 
-            chunks: list[str] = []
-            async for piece in brain.stream_reply(
-                build_jamie_system_prompt(crm, state),
-                history=[],
-                user_message=msg,
-            ):
-                chunks.append(piece)
-            reply = "".join(chunks).strip()
-            await _emit_transcript("jamie", reply)
-            return reply
+        async def on_user_turn_completed(  # type: ignore[override]
+            self,
+            turn_ctx: ChatContext,
+            new_message,
+        ) -> None:
+            """Called every time the user finishes a turn.
 
-    async def entrypoint(ctx: "JobContext") -> None:  # pragma: no cover - integration
-        await ctx.connect()
-        await bridge_publish({"type": "call_start", "crm": crm})
-        session = AgentSession(stt=stt_inst, tts=tts)  # type: ignore[arg-type]
-        await session.start(agent=JamieAgent(), room=ctx.room)
-        await session.say(opening_line(crm))
-        await session.aclose_when_finished()
-        await bridge_publish({"type": "call_end", "claim_json": state.to_dict()})
+            Live transcript + GLiNER2 extraction → dashboard.
+            We also rebuild the system prompt so Jamie always reads from
+            the freshest claim state.
+            """
+            text = (new_message.text_content or "").strip()
+            if not text:
+                return
 
-    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))  # type: ignore[arg-type]
+            await bridge_publish({
+                "type": "transcript",
+                "speaker": "caller",
+                "text": redact(text),
+            })
+
+            # Run the extractor in a thread (gliner is sync / CPU-bound)
+            out = await asyncio.to_thread(extractor.extract, text)
+            for label, info in out["pillars"].items():
+                state.fill(label, info["text"], confidence=info["score"])
+                await bridge_publish({
+                    "type": "entity",
+                    "label": label,
+                    "value": info["text"],
+                    "confidence": info["score"],
+                })
+            for label, info in out["fraud"].items():
+                state.flag_fraud(label, info["text"], severity="medium")
+                await bridge_publish({
+                    "type": "fraud_signal",
+                    "signal": label,
+                    "severity": "medium",
+                    "evidence": info["text"],
+                })
+
+            # Refresh Jamie's system prompt with the new claim state.
+            self.update_instructions(build_jamie_system_prompt(crm, state))
+
+        async def on_exit(self) -> None:  # type: ignore[override]
+            await bridge_publish({
+                "type": "call_end",
+                "claim_json": state.to_dict(),
+            })
+
+    return JamieAgent()
+
+
+# --------------------------------------------------------------------------
+async def entrypoint(ctx) -> None:  # type: ignore[no-untyped-def]
+    """LiveKit-agents entrypoint — invoked once per dispatched job."""
+    await ctx.connect()
+
+    crm_name = os.environ.get("DEMO_CRM_PROFILE", "max_mueller")
+    crm = load_crm(crm_name)
+    state = ClaimState(call_id=f"lk-{ctx.job.id if hasattr(ctx, 'job') else crm_name}")
+
+    session = build_session(crm, state)
+    agent = build_agent(crm, state)
+
+    await session.start(agent=agent, room=ctx.room)
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--crm", default=os.environ.get("DEMO_CRM_PROFILE", "max_mueller"))
-    args = parser.parse_args()
-    asyncio.run(run_agent(args.crm))
+    try:
+        from livekit.agents import WorkerOptions, cli
+    except Exception as e:
+        print(
+            "livekit-agents not installed.\n\n"
+            "    pip install \"livekit-agents[gradium,google,silero]>=1.4,<2.0\"\n\n"
+            f"(import error: {e})"
+        )
+        sys.exit(2)
+    cli.run_app(WorkerOptions(entrypoint_fnc=entrypoint))
 
 
 if __name__ == "__main__":

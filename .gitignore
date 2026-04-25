@@ -48,3 +48,6 @@ transcripts/
 
 # Entire local cache
 .entire/
+
+# Cowork / Claude Code session metadata
+.claude/
