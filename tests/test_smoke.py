@@ -80,6 +80,32 @@ def test_prompt_rules_section_is_tight():
     )
 
 
+def test_intent_classifier_basic():
+    """The asked-pillar tracker is the real fix for repetition.  Smoke
+    a few representative Jamie utterances."""
+    from agent.intent import classify_jamie_question
+    assert classify_jamie_question("Are you okay? Anyone hurt?") == {"injuries"}
+    assert classify_jamie_question("Is the car drivable?") == {"vehicle_drivable"}
+    assert classify_jamie_question("Were the police called? Got a case number?") == {
+        "police_involved", "police_case_number"
+    }
+    assert classify_jamie_question("Just so I have it noted.") == set()
+
+
+def test_asked_pillars_excluded_from_ask_next():
+    """If a pillar is in asked_pillars, it must NOT appear under
+    'ASK NEXT' in the prompt summary — that's what stops cycling."""
+    from agent.claim_state import ClaimState
+    s = ClaimState(call_id="t")
+    s.mark_asked({"vehicle_drivable", "injuries"})
+    summary = s.unfilled_summary_compact()
+    # Both pillars should appear under "ASKED BUT NO ANSWER YET", not "ASK NEXT"
+    new_section = summary.split("ASKED BUT NO ANSWER YET")[0]
+    assert "vehicle_drivable" not in new_section
+    assert "injuries" not in new_section
+    assert "ASKED BUT NO ANSWER YET" in summary
+
+
 def test_unfilled_summary_has_no_scripted_questions():
     """Pre-written sample questions in the system prompt cause the LLM to
     reuse them verbatim every turn.  We removed the hint phrasings; this

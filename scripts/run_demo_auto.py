@@ -46,6 +46,7 @@ except Exception:
 from agent.claim_state import ClaimState
 from agent.prompts import build_jamie_system_prompt, opening_line
 from agent.gemini_client import GeminiBrain
+from agent.intent import classify_jamie_question
 from agent.pii_redact import redact
 from extraction.gliner2_service import ExtractionService
 from bridge.client import publish as bridge_publish
@@ -213,6 +214,13 @@ async def run_scenario(scenario_path: Path, pace: str, no_bridge: bool) -> Path:
         reply = ("".join(chunks)).strip() or "(silence — model returned nothing)"
         await speak("jamie", reply)
         history.append({"role": "model", "text": reply})
+
+        # Track which pillars Jamie just asked about so the next prompt
+        # excludes them from "ASK NEXT" — the real repetition fix.
+        asked_now = classify_jamie_question(reply)
+        if asked_now:
+            state.mark_asked(asked_now)
+            print(f"  {Term.DIM}[asked: {', '.join(sorted(asked_now))}]{Term.END}")
 
     # Wrap up
     await emit({"type": "call_end", "claim_json": state.to_dict()})
