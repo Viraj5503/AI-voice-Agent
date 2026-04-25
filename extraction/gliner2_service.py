@@ -25,7 +25,11 @@ from collections.abc import AsyncIterator, Callable, Awaitable
 from dataclasses import dataclass
 from typing import Any
 
-# 13 Inca data pillars + sub-pillars (15 total) — must match agent/claim_state.PILLARS
+# GLiNER works best with NATURAL-LANGUAGE entity labels, not snake_case.
+# We keep the canonical pillar IDs (snake_case, used everywhere else in the
+# codebase) and a parallel list of human-readable phrasings GLiNER actually
+# understands.  predict_entities() uses the human labels; we map back to
+# the canonical IDs before returning.
 CLAIM_LABELS: list[str] = [
     "accident_date",
     "accident_time",
@@ -44,6 +48,30 @@ CLAIM_LABELS: list[str] = [
     "settlement_preference",
 ]
 
+# Human-readable label → canonical ID.  These phrasings are what we feed
+# into GLiNER.predict_entities() — bi-encoder GLiNERs match the entity
+# label embedding against text embeddings, so vague snake_case labels
+# (police_case_number) match almost nothing while "police case number"
+# matches reliably.  Threshold also drops from 0.45 → 0.30 because the
+# bi-encoder's natural similarities run lower than the cross-encoder's.
+HUMAN_TO_ID: dict[str, str] = {
+    "date of the accident":        "accident_date",
+    "time of the accident":        "accident_time",
+    "accident location":           "accident_location",
+    "road type":                   "road_type",
+    "weather conditions":          "weather_conditions",
+    "other vehicle license plate": "other_party_plate",
+    "other driver's name":         "other_party_name",
+    "other party insurer":         "other_party_insurer",
+    "police case number":          "police_case_number",
+    "injury":                      "injury_description",
+    "vehicle drivable":            "vehicle_drivable",
+    "admission of fault":          "fault_admission",
+    "witness name":                "witness_name",
+    "vehicle damage":              "damage_description",
+    "preferred repair shop":       "settlement_preference",
+}
+
 FRAUD_LABELS: list[str] = [
     "delayed_reporting",
     "known_to_other_party",
@@ -51,6 +79,14 @@ FRAUD_LABELS: list[str] = [
     "prior_similar_incident",
     "timeline_inconsistency",
 ]
+
+FRAUD_HUMAN_TO_ID: dict[str, str] = {
+    "delayed reporting":              "delayed_reporting",
+    "known relationship to other party": "known_to_other_party",
+    "vehicle listed for sale":         "vehicle_listed_for_sale",
+    "prior similar incident":          "prior_similar_incident",
+    "timeline inconsistency":          "timeline_inconsistency",
+}
 
 
 _MODEL_CANDIDATES = [
@@ -70,7 +106,7 @@ class Extraction:
 class ExtractionService:
     """Wraps GLiNER2 with sane defaults and a regex fallback."""
 
-    def __init__(self, model_name: str | None = None, threshold: float = 0.45) -> None:
+    def __init__(self, model_name: str | None = None, threshold: float = 0.30) -> None:
         self.threshold = threshold
         self.model_name: str | None = None
         self._model: Any = None
@@ -106,11 +142,16 @@ class ExtractionService:
         fraud: dict[str, Extraction] = {}
 
         if self._mode == "gliner" and self._model is not None:
+            # Feed GLiNER the natural-language phrasings; map back to canonical IDs.
+            human_labels = list(HUMAN_TO_ID.keys()) + list(FRAUD_HUMAN_TO_ID.keys())
             ents = self._model.predict_entities(
-                text, CLAIM_LABELS + FRAUD_LABELS, threshold=self.threshold
+                text, human_labels, threshold=self.threshold
             )
             for e in ents:
-                lab = e["label"]
+                human = e["label"]
+                lab = HUMAN_TO_ID.get(human) or FRAUD_HUMAN_TO_ID.get(human)
+                if not lab:
+                    continue
                 ex = Extraction(label=lab, text=e["text"], score=float(e.get("score", 0.0)))
                 bucket = fraud if lab in FRAUD_LABELS else pillars
                 # keep highest-confidence per label

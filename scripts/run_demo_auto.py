@@ -53,6 +53,7 @@ from agent.gemini_client import GeminiBrain
 from agent.intent import classify_jamie_question
 from agent.pii_redact import redact
 from extraction.gliner2_service import ExtractionService
+from extraction.gemini_extractor import GeminiExtractor
 from bridge.client import publish as bridge_publish
 from tools.tavily_lookup import DISPATCH as TAVILY_DISPATCH
 
@@ -116,11 +117,15 @@ async def run_scenario(scenario_path: Path, pace: str, no_bridge: bool) -> Path:
 
     state = ClaimState(call_id=f"auto-{scenario['name']}-{int(time.time())}")
     brain = GeminiBrain()
-    extractor = ExtractionService()
+    # Gemini-Lite extractor by default with GLiNER as fallback — fixes
+    # the 0/15 problem we saw on bi-large (low-similarity threshold +
+    # snake_case labels were poor) without giving up the speed/cost
+    # comparison narrative that GLiNER provides.
+    extractor = GeminiExtractor(fallback=ExtractionService())
 
     banner(f"AUTO DEMO  •  scenario: {scenario['name']}  •  CRM: {crm_name}")
     print(f"  Gemini:    {'live ' + brain.model_name if brain._real else 'stub fallback'}")
-    print(f"  Extractor: {extractor.mode}  ({extractor.model_name or 'regex stub'})")
+    print(f"  Extractor: {extractor.mode}")
     print(f"  Bridge:    {'OFF' if no_bridge else 'http://localhost:8765'}")
     print(f"  Pace:      {pace}")
 

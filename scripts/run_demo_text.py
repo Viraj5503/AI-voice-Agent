@@ -39,6 +39,7 @@ from agent.prompts import build_jamie_system_prompt, opening_line
 from agent.intent import classify_jamie_question
 from agent.pii_redact import redact
 from extraction.gliner2_service import ExtractionService
+from extraction.gemini_extractor import GeminiExtractor
 from bridge.client import publish as bridge_publish
 from tools.tavily_lookup import DISPATCH as TAVILY_DISPATCH
 
@@ -82,11 +83,11 @@ async def run() -> None:
     crm = load_crm(args.crm)
     state = ClaimState(call_id=f"text-demo-{args.crm}")
     brain = GeminiBrain()
-    extractor = ExtractionService()
+    extractor = GeminiExtractor(fallback=ExtractionService())
 
     print(f"\n  CRM:        {args.crm}")
     print(f"  Gemini:     {'live' if brain._real else 'stub fallback'}")
-    print(f"  Extractor:  {extractor.mode}  ({extractor.model_name or 'regex'})")
+    print(f"  Extractor:  {extractor.mode}")
     print(f"  Bridge:     {'OFF' if args.no_bridge else 'http://localhost:8765/publish'}")
     print( "  Tip:        type 'quit' to end the call.\n")
 

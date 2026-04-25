@@ -60,24 +60,37 @@ def test_prompt_builder_includes_crm():
     # The prompt must inline the CRM
     assert "Max Müller" in p
     assert "Volkswagen" in p
-    # ...and must include the anti-hallucination + anti-repetition rules
-    assert "QUOTE THE CRM" in p
-    assert "READ THE CONVERSATION HISTORY" in p
+    # ...and must include the load-bearing rules.  Phrasings updated for
+    # the multi-domain pivot ("CONTEXT" not "CRM", but functionally same).
+    assert "QUOTE THE CONTEXT" in p
+    assert "ACKNOWLEDGE THE CALLER" in p
     assert "NEVER ASK FOR DATA SHOWN" in p
+    assert "CAPTURE OPPORTUNISTICALLY" in p
 
 
 def test_prompt_rules_section_is_tight():
-    """The repetition-causing bloat was in the *rules* section, not the
-    CRM JSON dump (which is just reference data the LLM consults).  This
-    test guards against rule-creep — if anyone adds long inline examples
-    or scripted phrasings, the rules section will grow and Jamie will
-    start parroting them.  CRM data is allowed to be as big as the
-    actual JSON requires."""
+    """Guard against rule-creep that dilutes instruction salience.  We
+    bumped the cap to 2500 when the multi-domain rewrite added the
+    'always acknowledge' rule (worth the chars — directly addresses the
+    'list-walker' criticism)."""
     from agent.prompts import _PERSONA_AND_RULES
-    assert len(_PERSONA_AND_RULES) < 2200, (
-        f"rules section is {len(_PERSONA_AND_RULES)} chars — keep it under 2200 "
+    assert len(_PERSONA_AND_RULES) < 2500, (
+        f"rules section is {len(_PERSONA_AND_RULES)} chars — keep it under 2500 "
         "or add a justification.  Long rules = diluted instructions = repetition."
     )
+
+
+def test_claim_state_to_dict_is_json_serializable():
+    """asked_pillars is a set; ClaimState.to_dict must convert it to a
+    list so json.dumps doesn't blow up at transcript save time."""
+    import json as _json
+    from agent.claim_state import ClaimState
+    s = ClaimState(call_id="t")
+    s.mark_asked({"injuries", "vehicle_drivable"})
+    d = s.to_dict()
+    raw = _json.dumps(d)  # must not raise
+    assert "injuries" in raw
+    assert "vehicle_drivable" in raw
 
 
 def test_intent_classifier_basic():
@@ -92,18 +105,17 @@ def test_intent_classifier_basic():
     assert classify_jamie_question("Just so I have it noted.") == set()
 
 
-def test_asked_pillars_excluded_from_ask_next():
+def test_asked_pillars_excluded_from_open_targets():
     """If a pillar is in asked_pillars, it must NOT appear under
-    'ASK NEXT' in the prompt summary — that's what stops cycling."""
+    'OPEN TARGETS' — that's what stops the list-walker pattern."""
     from agent.claim_state import ClaimState
     s = ClaimState(call_id="t")
     s.mark_asked({"vehicle_drivable", "injuries"})
     summary = s.unfilled_summary_compact()
-    # Both pillars should appear under "ASKED BUT NO ANSWER YET", not "ASK NEXT"
-    new_section = summary.split("ASKED BUT NO ANSWER YET")[0]
-    assert "vehicle_drivable" not in new_section
-    assert "injuries" not in new_section
-    assert "ASKED BUT NO ANSWER YET" in summary
+    open_section = summary.split("PARKED")[0]
+    assert "vehicle_drivable" not in open_section
+    assert "injuries" not in open_section
+    assert "PARKED" in summary
 
 
 def test_unfilled_summary_has_no_scripted_questions():

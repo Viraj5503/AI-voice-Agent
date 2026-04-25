@@ -105,35 +105,35 @@ class ClaimState:
         return "\n".join(f"  - {label}: {hint}" for label, hint in unfilled)
 
     def unfilled_summary_compact(self) -> str:
-        """Pillar summary split into THREE buckets so the LLM stops
-        cycling.  Without this split, the prompt repeats the same
-        unfilled pillars every turn and Jamie keeps re-asking.
+        """Phrase the unfilled targets as opportunistic capture goals,
+        NOT a question queue.  This is the load-bearing language that
+        stops Jamie from sounding like a list-walker.
 
         Buckets:
-          NEW          — never asked, never answered: ask these now.
-          PENDING      — already asked, no answer yet: rephrase ONCE
-                          or move on; do NOT re-ask twice in a row.
-          (filled ones are listed separately under ALREADY HEARD)
+          OPEN     — never asked, never answered: capture if the caller
+                     opens a natural door, otherwise let it sit.
+          PARKED   — already asked, no answer yet: do not push; capture
+                     opportunistically only.
         """
         unfilled = self.unfilled_pillars()
         if not unfilled:
-            return "(all 15 pillars gathered — wrap up warmly with a claim reference)"
+            return "(all targets captured — wrap up warmly with a reference number)"
         new = [(l, d) for (l, d) in unfilled if l not in self.asked_pillars]
         pending = [(l, d) for (l, d) in unfilled if l in self.asked_pillars]
 
         out: list[str] = []
         if new:
-            out.append("ASK NEXT (priority order — pick the most natural one given the caller's last message):")
+            out.append("OPEN TARGETS (capture only if the caller's last sentence opens a natural door — never read these as a checklist):")
             for lab, desc in new[:4]:
                 out.append(f"  • {lab}  —  {desc}")
             if len(new) > 4:
-                out.append(f"  …and {len(new) - 4} more pillars later")
+                out.append(f"  …and {len(new) - 4} more, lower priority")
         if pending:
-            out.append("\nASKED BUT NO ANSWER YET (do NOT re-ask the same way; either rephrase ONCE or skip):")
+            out.append("\nPARKED (already touched on, do NOT re-raise — let the caller bring them up):")
             for lab, desc in pending:
                 out.append(f"  · {lab}  —  {desc}")
         if not new and pending:
-            out.insert(0, "All remaining pillars have been asked once.  Wrap up the call rather than re-asking.")
+            out.insert(0, "Every target has been touched on at least once.  Stop probing; respond to whatever the caller raises and move toward closing.")
         return "\n".join(out)
 
     def fraud_risk_score(self) -> int:
@@ -143,4 +143,8 @@ class ClaimState:
         return min(10, total)
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        d = asdict(self)
+        # asked_pillars is a set; JSON can't serialize sets.  Use a sorted
+        # list (deterministic for snapshot tests + diff-friendly).
+        d["asked_pillars"] = sorted(self.asked_pillars)
+        return d
