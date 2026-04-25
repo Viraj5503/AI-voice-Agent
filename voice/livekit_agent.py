@@ -86,13 +86,28 @@ def _build_llm():
             temperature=0.85,
         )
 
-    # ollama via OpenAI-compatible /v1/chat/completions endpoint.
-    # Timeout 30s to tolerate first-call model warmup (~10s on M-series).
-    base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434") + "/v1"
+    # OpenAI-compatible LLM hop.  Defaults to local Ollama, but swap-in
+    # for any hosted provider that speaks the OpenAI /v1 protocol by
+    # setting LLM_BASE_URL + LLM_API_KEY + LLM_MODEL.  Useful escape
+    # hatches when the laptop is overloaded or local quality is too low:
+    #   - Groq Cloud      base=https://api.groq.com/openai
+    #                     model=llama-3.3-70b-versatile  (free 14k req/day)
+    #   - Cerebras Cloud  base=https://api.cerebras.ai
+    #                     model=llama-3.3-70b  (free tier, sub-200ms)
+    #   - OpenAI direct   base=https://api.openai.com
+    #                     model=gpt-4o-mini
+    # Timeout 30s tolerates Ollama's ~10s first-call warmup; harmless on
+    # hosted providers since they respond in <1s.
+    base_url_root = os.environ.get(
+        "LLM_BASE_URL",
+        os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
+    )
     return lk_openai.LLM(
-        model=os.environ.get("OLLAMA_MODEL", "llama3.2"),
-        api_key="ollama",  # placeholder — Ollama doesn't auth, but the SDK requires a string
-        base_url=base_url,
+        model=os.environ.get(
+            "LLM_MODEL", os.environ.get("OLLAMA_MODEL", "llama3.2")
+        ),
+        api_key=os.environ.get("LLM_API_KEY", "ollama"),
+        base_url=base_url_root.rstrip("/") + "/v1",
         temperature=0.85,
         timeout=30.0,
     )
@@ -104,10 +119,31 @@ def build_session(crm: dict, state: ClaimState):
     # (YTpq7expH9539ERJ — flagship "Emma") when unset.
     voice_id = os.environ.get("GRADIUM_VOICE_ID") or None
 
+    # Gradium TTS tone tuning — humanic warmth for the Turing test.
+    # temp 0.85   = natural variation, not robotic consistency
+    # padding_bonus 0.3 = slightly slower / more deliberate pace
+    # cfg_coef 2.2  = high voice consistency turn-to-turn
+    # rewrite_rules en  = English number/date pronunciation rules.
+    #                     Set GRADIUM_LANGUAGE=de in .env to flip German.
+    tts_json_config = {
+        "temp": float(os.environ.get("GRADIUM_TEMP", 0.85)),
+        "padding_bonus": float(os.environ.get("GRADIUM_PADDING", 0.3)),
+        "cfg_coef": float(os.environ.get("GRADIUM_CFG", 2.2)),
+        "rewrite_rules": os.environ.get("GRADIUM_LANGUAGE", "en"),
+    }
+    tts_kwargs = {"json_config": tts_json_config}
+    if voice_id:
+        tts_kwargs["voice_id"] = voice_id
+
+    # Gradium STT — temperature=0.0 stops Whisper-style noise hallucination
+    # ("Marama", "Englishman", "I live in Chicago" appearing from background
+    # ambient sound).  vad_threshold 0.9 / vad_bucket 2 are SDK defaults.
+    stt = lk_gradium.STT(temperature=0.0)
+
     return AgentSession(
-        stt=lk_gradium.STT(),
+        stt=stt,
         llm=_build_llm(),
-        tts=lk_gradium.TTS(voice_id=voice_id) if voice_id else lk_gradium.TTS(),
+        tts=lk_gradium.TTS(**tts_kwargs),
         vad=lk_silero.VAD.load(),
     )
 

@@ -74,9 +74,12 @@ def test_prompt_rules_section_is_tight():
     'always acknowledge' rule (worth the chars — directly addresses the
     'list-walker' criticism)."""
     from agent.prompts import _PERSONA_AND_RULES
-    assert len(_PERSONA_AND_RULES) < 2500, (
-        f"rules section is {len(_PERSONA_AND_RULES)} chars — keep it under 2500 "
-        "or add a justification.  Long rules = diluted instructions = repetition."
+    assert len(_PERSONA_AND_RULES) < 2700, (
+        f"rules section is {len(_PERSONA_AND_RULES)} chars — keep it under 2700 "
+        "or add a justification.  Long rules = diluted instructions = repetition.  "
+        "Bumped from 2500 → 2700 to fit Rule 9 (address-vs-incident-location) "
+        "after the live console run had Jamie hallucinating the policyholder's "
+        "Berlin home address as the accident scene."
     )
 
 
