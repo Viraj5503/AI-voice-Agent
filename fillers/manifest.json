@@ -1,0 +1,37 @@
+{
+  "voice_id_env": "GRADIUM_VOICE_ID",
+  "format": "pcm_48k_16le_mono",
+  "categories": {
+    "db_lookup": [
+      {"id": "db_pull_file",        "duration_s": 1.2, "text": "Let me just pull up your file here…"},
+      {"id": "db_loading",          "duration_s": 1.1, "text": "Just a moment, my system is loading…"},
+      {"id": "db_policy_screen",    "duration_s": 1.0, "text": "I've got your policy here on screen…"},
+      {"id": "db_coverage_check",   "duration_s": 1.3, "text": "Let me check the coverage details for that…"},
+      {"id": "db_claims_history",   "duration_s": 1.0, "text": "Pulling up your claims history…"}
+    ],
+    "tavily_lookup": [
+      {"id": "tav_map_loading",     "duration_s": 1.8, "text": "Give me a second, I'm loading the map for that area…"},
+      {"id": "tav_towing_search",   "duration_s": 1.9, "text": "Let me see who's closest to you for a tow…"},
+      {"id": "tav_road_conditions", "duration_s": 1.5, "text": "I'm just checking our road condition reports…"},
+      {"id": "tav_station_lookup",  "duration_s": 2.0, "text": "One moment, finding the nearest station to file that…"}
+    ],
+    "extraction": [
+      {"id": "ext_typing",          "duration_s": 1.0, "text": "Okay, typing that into the incident report…"},
+      {"id": "ext_noting",          "duration_s": 0.9, "text": "Just noting that down, bear with me…"},
+      {"id": "ext_spelling",        "duration_s": 1.1, "text": "I want to make sure I have the spelling right…"}
+    ],
+    "empathy": [
+      {"id": "emp_mmhmm",           "duration_s": 0.3, "text": "Mm-hmm."},
+      {"id": "emp_okay",            "duration_s": 0.2, "text": "Okay."},
+      {"id": "emp_right_right",     "duration_s": 0.4, "text": "Right, right."},
+      {"id": "emp_oh_gosh",         "duration_s": 0.3, "text": "Oh gosh."},
+      {"id": "emp_got_it",          "duration_s": 0.5, "text": "Okay, I've got that."},
+      {"id": "emp_awful",           "duration_s": 0.6, "text": "Ugh, that sounds awful."}
+    ],
+    "technical_delay": [
+      {"id": "td_slow_today",       "duration_s": 1.8, "text": "Sorry, my system is being a little slow today…"},
+      {"id": "td_db_connection",    "duration_s": 2.1, "text": "Bear with me, the connection to our database is…"},
+      {"id": "td_refreshing",       "duration_s": 2.3, "text": "Sorry about this, just refreshing the page…"}
+    ]
+  }
+}
