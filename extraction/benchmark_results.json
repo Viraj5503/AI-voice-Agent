@@ -1,8 +1,14 @@
 [
   {
-    "name": "GLiNER (stub: regex-stub)",
-    "latency_ms": 0.1,
+    "name": "GLiNER (gliner: knowledgator/gliner-bi-large-v2.0)",
+    "latency_ms": 365.9,
     "cost_per_call_usd": 0.0,
-    "f1": 0.444
+    "f1": 0.317
+  },
+  {
+    "name": "Gemini structured (gemini-flash-latest)",
+    "latency_ms": 4413.8,
+    "cost_per_call_usd": 0.0015,
+    "f1": 0.832
   }
 ]

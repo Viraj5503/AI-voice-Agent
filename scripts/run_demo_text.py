@@ -29,7 +29,7 @@ sys.path.insert(0, str(REPO))
 # load .env if available so demo reads keys without manual export
 try:
     from dotenv import load_dotenv  # type: ignore
-    load_dotenv(REPO / ".env")
+    load_dotenv(REPO / ".env", override=True)
 except Exception:
     pass
 

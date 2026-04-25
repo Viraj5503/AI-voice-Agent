@@ -22,6 +22,13 @@ import time
 from pathlib import Path
 from statistics import mean
 
+# Load .env so GOOGLE_API_KEY is available when run as `python -m extraction.benchmark`.
+try:
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=True)
+except Exception:
+    pass
+
 from .gliner2_service import ExtractionService, CLAIM_LABELS, FRAUD_LABELS
 
 # tiny in-repo eval set — extend at hackathon time with synthetic data
@@ -109,38 +116,57 @@ def bench_gemini() -> dict | None:
     except Exception:
         return None
     client = genai.Client()
-    model = os.environ.get("GEMINI_MODEL", "gemini-3-flash")
+    # Try the rolling alias first, then fall back through pinned versions —
+    # same rotation pattern as agent/gemini_client.py.  Free-tier quota tends
+    # to hit one model bucket at a time, so rotation usually unsticks us.
+    candidates = [
+        os.environ.get("GEMINI_MODEL"),
+        "gemini-flash-latest",
+        "gemini-2.5-flash",
+        "gemini-2.5-flash-lite",
+    ]
+    seen: set[str] = set()
+    candidates = [c for c in candidates if c and not (c in seen or seen.add(c))]
+
     schema_prompt = (
         "Extract these labels (subset only if present) into JSON: "
         + ", ".join(CLAIM_LABELS + FRAUD_LABELS)
         + ".  Return strict JSON, keys = labels, values = literal strings from the text."
     )
-    f1s, latencies = [], []
-    for ex in EVAL_DATA:
-        t0 = time.perf_counter()
-        resp = client.models.generate_content(
-            model=model,
-            contents=[ex["text"]],
-            config=types.GenerateContentConfig(
-                system_instruction=schema_prompt,
-                response_mime_type="application/json",
-                temperature=0.1,
-            ),
-        )
-        latencies.append((time.perf_counter() - t0) * 1000)
+
+    for model in candidates:
+        f1s, latencies = [], []
         try:
-            pred = json.loads(resp.text)
-        except Exception:
-            pred = {}
-        f1s.append(_f1(pred, ex["gold"]))
-    # Rough cost: 0.50/M input + 3.00/M output (Gemini 3 Flash pricing).
-    avg_cost = 0.0015
-    return {
-        "name": f"Gemini structured ({model})",
-        "latency_ms": round(mean(latencies), 1),
-        "cost_per_call_usd": avg_cost,
-        "f1": round(mean(f1s), 3),
-    }
+            for ex in EVAL_DATA:
+                t0 = time.perf_counter()
+                resp = client.models.generate_content(
+                    model=model,
+                    contents=[ex["text"]],
+                    config=types.GenerateContentConfig(
+                        system_instruction=schema_prompt,
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                    ),
+                )
+                latencies.append((time.perf_counter() - t0) * 1000)
+                try:
+                    pred = json.loads(resp.text)
+                except Exception:
+                    pred = {}
+                f1s.append(_f1(pred, ex["gold"]))
+        except Exception as e:
+            short = str(e).split("\n", 1)[0][:80]
+            print(f"  [bench-gemini] {model} failed: {short} — trying next model", flush=True)
+            continue
+        # Rough cost: 0.50/M input + 3.00/M output (Gemini Flash pricing).
+        return {
+            "name": f"Gemini structured ({model})",
+            "latency_ms": round(mean(latencies), 1),
+            "cost_per_call_usd": 0.0015,
+            "f1": round(mean(f1s), 3),
+        }
+    print("  [bench-gemini] all models exhausted (likely free-tier 429) — skipping Gemini row")
+    return None
 
 
 def main() -> None:
