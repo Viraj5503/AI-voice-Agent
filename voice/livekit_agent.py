@@ -66,6 +66,10 @@ def load_crm(name: str) -> dict:
 
 
 # --------------------------------------------------------------------------
+def _on_ollama() -> bool:
+    return (os.environ.get("BRAIN_PROVIDER") or "ollama").lower() == "ollama"
+
+
 def _build_llm():
     """Pick the LLM based on BRAIN_PROVIDER, mirroring agent.brain.make_brain.
 
@@ -76,21 +80,21 @@ def _build_llm():
 
     The Gradium STT/TTS path is unaffected — only the LLM hop changes.
     """
-    provider = (os.environ.get("BRAIN_PROVIDER") or "ollama").lower()
-
-    if provider == "gemini":
+    if not _on_ollama():
         return lk_google.LLM(
             model=os.environ.get("GEMINI_MODEL", "gemini-flash-latest"),
             temperature=0.85,
         )
 
-    # ollama via OpenAI-compatible /v1/chat/completions endpoint
+    # ollama via OpenAI-compatible /v1/chat/completions endpoint.
+    # Timeout 30s to tolerate first-call model warmup (~10s on M-series).
     base_url = os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434") + "/v1"
     return lk_openai.LLM(
         model=os.environ.get("OLLAMA_MODEL", "llama3.2"),
         api_key="ollama",  # placeholder — Ollama doesn't auth, but the SDK requires a string
         base_url=base_url,
         temperature=0.85,
+        timeout=30.0,
     )
 
 
@@ -108,16 +112,46 @@ def build_session(crm: dict, state: ClaimState):
     )
 
 
+def _location_keywords(text: str) -> bool:
+    """Same triggers scripts/run_demo_auto.py uses for heuristic Tavily."""
+    lower = text.lower()
+    return any(k in lower for k in (
+        "a1","a2","a3","a4","a5","a6","a7","a8","a9","a10","autobahn",
+        "köln","koln","cologne","berlin","münchen","munich","stuttgart",
+        "hauptstraße","hauptstrasse","lindenweg","industriestraße",
+    ))
+
+
 def build_agent(crm: dict, state: ClaimState):
     """The Agent subclass holds Jamie's persona + the on_user_turn_completed
-    hook that forks transcripts to GLiNER2 + the dashboard bridge."""
+    hook that forks transcripts to GLiNER2 + the dashboard bridge.
+
+    Tool registration is provider-aware: on Ollama (llama3.2 3B) the
+    OpenAI-compatible tool-call JSON is mangled (model emits
+    `{"location": {"type":"string","value":"..."}}` instead of just
+    `"..."`), so we disable LLM-driven tools and fire Tavily heuristically
+    from on_user_turn_completed instead.  Same dashboard tool_call /
+    tool_result events fire either way.
+    """
     extractor = ExtractionService()
+    skip_tools = _on_ollama()
+    # Recent tool results — fed into build_jamie_system_prompt so the LLM
+    # can quote real Tavily output instead of inventing weather facts.
+    tool_results: list[dict] = []
 
     class JamieAgent(Agent):
         def __init__(self) -> None:
             super().__init__(
                 instructions=build_jamie_system_prompt(crm, state),
             )
+            # livekit-agents always merges class-decorated @function_tool
+            # methods via find_function_tools() regardless of the `tools`
+            # constructor arg.  To actually disable tools on Ollama (where
+            # llama3.2 mangles the OpenAI tool-call JSON), wipe _tools and
+            # the chat_ctx tools list after super init.
+            if skip_tools:
+                self._tools = []
+                self._chat_ctx = self._chat_ctx.copy(tools=[])
 
         async def on_enter(self) -> None:  # type: ignore[override]
             # Push a call_start event with the full CRM so the dashboard
@@ -203,10 +237,34 @@ def build_agent(crm: dict, state: ClaimState):
                     "evidence": info["text"],
                 })
 
+            # Heuristic Tavily fire when LLM-driven tools are disabled
+            # (Ollama path).  The result is folded into the next prompt
+            # refresh via tool_results so Jamie can reference real
+            # conditions even though she didn't "decide" to call the tool.
+            if skip_tools and _location_keywords(text):
+                from tools.tavily_lookup import lookup_weather as _lw
+                await bridge_publish({
+                    "type": "tool_call",
+                    "name": "tavily_lookup_weather",
+                    "args": {"location": text[:80]},
+                })
+                weather = await asyncio.to_thread(_lw, text[:80])
+                await bridge_publish({
+                    "type": "tool_result",
+                    "name": "tavily_lookup_weather",
+                    "result": weather,
+                })
+                tool_results.append({
+                    "name": "tavily_lookup_weather",
+                    "result": weather,
+                })
+
             # Refresh Jamie's system prompt with the new claim state.
             # update_instructions is async — without await, the prompt never
             # actually refreshes turn-to-turn (RuntimeWarning fires).
-            await self.update_instructions(build_jamie_system_prompt(crm, state))
+            await self.update_instructions(
+                build_jamie_system_prompt(crm, state, tool_results=tool_results)
+            )
 
         async def on_exit(self) -> None:  # type: ignore[override]
             await bridge_publish({
