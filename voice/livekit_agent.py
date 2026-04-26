@@ -227,9 +227,33 @@ async def entrypoint(ctx: JobContext) -> None:
     # we get per-turn CRM context + claim state injection.  The Agent object
     # here is purely an audio pipeline shell (STT / TTS / VAD).
     vad = lk_silero.VAD.load()
-    # temperature=0.0 suppresses Whisper-style noise hallucinations
-    # ("Marama", "Thank you", "I live in Chicago" from background ambient sound)
-    stt = lk_gradium.STT(temperature=0.0)
+    # Gradium STT — three knobs working together to stop the live
+    # fragment-as-turn segmentation issue (one continuous statement
+    # producing 3-4 separate user_input_transcribed events with
+    # is_final=True) without adding perceived latency:
+    #
+    #   temperature=0.0 suppresses Whisper-style noise hallucinations
+    #     ("Marama", "Thank you", "I live in Chicago" from background
+    #     ambient sound).
+    #
+    #   vad_threshold=0.85 (up from SDK default 0.6) requires MORE
+    #     confident silence before Gradium emits a final transcript.
+    #     Mid-sentence breaths under that threshold get batched into
+    #     the same transcript instead of fragmenting into separate
+    #     user_input_transcribed events that each fire a turn.
+    #
+    #   buffer_size_seconds=0.12 (up from default 0.08) widens the
+    #     interim-transcript debounce window so micro-fragments
+    #     collapse into one event before reaching the listener.
+    #
+    # All three env-overridable so they can be retuned at the venue
+    # without a redeploy.  These are the surviving STT-segmentation
+    # fixes applicable to the current GeminiBrain-direct architecture.
+    stt = lk_gradium.STT(
+        temperature=0.0,
+        vad_threshold=float(os.environ.get("GRADIUM_VAD_THRESHOLD", 0.85)),
+        buffer_size_seconds=float(os.environ.get("GRADIUM_BUFFER_S", 0.12)),
+    )
     tts = lk_gradium.TTS(**tts_kwargs)
 
     agent = Agent(
