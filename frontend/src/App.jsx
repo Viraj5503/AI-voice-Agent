@@ -6,7 +6,7 @@ import ClaimProgress from './components/ClaimProgress'
 import FraudGauge    from './components/FraudGauge'
 import styles        from './App.module.css'
 
-/* ── 3D card tilt wrapper ──────────────────────────────────── */
+/* ── 3D tilt ──────────────────────────────────────────────── */
 function Tilt({ children, className = '', intensity = 8 }) {
   const ref = useRef(null)
   const raf = useRef(null)
@@ -15,10 +15,10 @@ function Tilt({ children, className = '', intensity = 8 }) {
     raf.current = requestAnimationFrame(() => {
       if (!ref.current) return
       const r  = ref.current.getBoundingClientRect()
-      const cx = (e.clientX - r.left)  / r.width  - 0.5
-      const cy = (e.clientY - r.top)   / r.height - 0.5
+      const cx = (e.clientX - r.left) / r.width  - 0.5
+      const cy = (e.clientY - r.top)  / r.height - 0.5
       ref.current.style.transform =
-        `perspective(900px) rotateY(${cx * intensity}deg) rotateX(${-cy * intensity}deg) translateZ(6px)`
+        `perspective(900px) rotateY(${cx * intensity}deg) rotateX(${-cy * intensity}deg) translateZ(4px)`
     })
   }, [intensity])
   const onLeave = useCallback(() => {
@@ -75,7 +75,7 @@ function ToolFeed({ tools }) {
           <span className={styles.toolArrow}>{t.type === 'tool_call' ? '↗' : '↙'}</span>
           <div className={styles.toolContent}>
             <div className={styles.toolName}>{(t.name || '').replace(/_/g, ' ')}</div>
-            {t.result?.summary && <div className={styles.toolSum}>{String(t.result.summary).slice(0,60)}</div>}
+            {t.result?.summary && <div className={styles.toolSum}>{String(t.result.summary).slice(0,72)}</div>}
           </div>
         </div>
       ))}
@@ -83,29 +83,47 @@ function ToolFeed({ tools }) {
   )
 }
 
-/* ── CRM panel ─────────────────────────────────────────────── */
+/* ── CRM panel (Health-aware) ──────────────────────────────── */
 function CRMPanel({ crm }) {
   if (!crm) return <div className={styles.empty}>Loads on call start</div>
   const p = crm.policyholder || {}
-  const v = crm.vehicle || {}
-  const c = crm.coverage || {}
+  const v = crm.vehicle      || {}
+  const c = crm.coverage     || {}
   const rows = [
-    ['👤 Name', p.name], ['🎂 DOB', p.dob], ['📞 Phone', p.phone],
-    ['📄 Policy', crm.policy?.policy_number], ['📦 Product', crm.policy?.product],
-    ['🚗 Vehicle', `${v.make||''} ${v.model||''}`.trim()],
-    ['🪪 Plate', v.plate], ['🛡 Coverage', c.type],
-    ['💰 Deduct.', c.deductible_kasko != null ? `€${c.deductible_kasko}` : null],
-    ['⭐ SF-Class', c.sf_class],
-    ['➕ Addons', Array.isArray(c.addons) ? c.addons.join(', ') : c.addons],
-  ].filter(([,v]) => v)
+    ['👤', 'Name',    p.name],
+    ['🎂', 'DOB',     p.dob],
+    ['📞', 'Phone',   p.phone],
+    ['📄', 'Policy',  crm.policy?.policy_number],
+    ['📦', 'Product', crm.policy?.product],
+    ['🚗', 'Vehicle', `${v.make||''} ${v.model||''}`.trim() || null],
+    ['🪪', 'Plate',   v.plate],
+    ['🛡', 'Coverage',c.type],
+  ].filter(([,, v]) => v)
   return (
     <div className={styles.crm}>
-      {rows.map(([k,v]) => (
+      {rows.map(([icon, k, v]) => (
         <div key={k} className={styles.crmRow}>
+          <span className={styles.crmIcon}>{icon}</span>
           <span className={styles.crmKey}>{k}</span>
           <span className={styles.crmVal}>{v}</span>
         </div>
       ))}
+    </div>
+  )
+}
+
+/* ── Location Map ──────────────────────────────────────────── */
+function MapPanel({ location }) {
+  if (!location) return null
+  const q = encodeURIComponent(location)
+  return (
+    <div className={styles.mapWrap}>
+      <div className={styles.mapLabel}>📍 {location}</div>
+      <iframe
+        width="100%" height="160"
+        frameBorder="0" style={{ border:0, borderRadius:'10px' }}
+        src={`https://maps.google.com/maps?q=${q}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
+        allowFullScreen/>
     </div>
   )
 }
@@ -128,24 +146,6 @@ function FinalClaim({ claim }) {
   )
 }
 
-/* ── Dynamic Location Map ─────────────────────────────────────── */
-function MapPanel({ location }) {
-  if (!location) return null
-  const encodedQuery = encodeURIComponent(location)
-  return (
-    <div style={{ borderRadius: '8px', overflow: 'hidden', height: '200px', width: '100%', marginTop: '0.5rem' }}>
-      <iframe 
-        width="100%" 
-        height="100%" 
-        frameBorder="0" 
-        style={{ border: 0 }}
-        src={`https://maps.google.com/maps?q=${encodedQuery}&t=&z=13&ie=UTF8&iwloc=&output=embed`}
-        allowFullScreen>
-      </iframe>
-    </div>
-  )
-}
-
 /* ══════════════════════════════════════════════════
    MAIN APP
 ══════════════════════════════════════════════════ */
@@ -155,8 +155,9 @@ export default function App() {
   const timer  = useTimer(callStartTime)
   const filled = Object.keys(pillars).length
   const incidentLocation = pillars.incident_location?.value
+  const callerName = crm?.policyholder?.name?.split(' ')[0] || 'Caller'
 
-  // Speaking detection
+  /* Speaker detection */
   const [jamieSpeak,  setJ] = useState(false)
   const [callerSpeak, setC] = useState(false)
   const spkTimer = useRef(null)
@@ -166,10 +167,10 @@ export default function App() {
     clearTimeout(spkTimer.current)
     if (last.speaker === 'jamie') { setJ(true); setC(false) }
     else                          { setC(true); setJ(false) }
-    spkTimer.current = setTimeout(() => { setJ(false); setC(false) }, 2400)
+    spkTimer.current = setTimeout(() => { setJ(false); setC(false) }, 2600)
   }, [transcript.length])
 
-  // Glow on new data
+  /* Glow on new data */
   const [glowClaim, setGC] = useState(false)
   const [glowFraud, setGF] = useState(false)
   useEffect(() => { setGC(true); setTimeout(()=>setGC(false),900) }, [filled])
@@ -178,28 +179,27 @@ export default function App() {
     setGF(true); setTimeout(()=>setGF(false),900)
   }, [Object.keys(fraud).length])
 
+  const totalPillars = filled  // updated dynamically by ClaimProgress component
+
   return (
     <div className={styles.app}>
 
-      {/* ══ HEADER ══════════════════════════════════════════════ */}
+      {/* ══ HEADER ════════════════════════════════════════════════ */}
       <header className={styles.header}>
         <div className={styles.brand}>
-          <div className={styles.logo}>
-            <span>V</span>
-          </div>
+          <div className={styles.logo}><span>V</span></div>
           <div>
             <div className={styles.brandName}>VORSICHT <em>Claims</em></div>
-            <div className={styles.brandSub}>AI-Powered FNOL Console · Jamie v2</div>
+            <div className={styles.brandSub}>AI Claims Intake · Adjuster Dashboard</div>
           </div>
         </div>
 
         <div className={styles.headerMid}>
-          {/* Animated spectrum bar — visible only when call active */}
           {callActive && (
             <div className={styles.spectrumWrap}>
-              {Array.from({length:16}).map((_,i)=>(
+              {Array.from({length:18}).map((_,i)=>(
                 <div key={i} className={styles.specBar}
-                     style={{ animationDelay:`${i*60}ms`, '--h': `${8+Math.random()*26}px` }} />
+                     style={{ animationDelay:`${i*55}ms`, '--h': `${8+Math.random()*28}px` }}/>
               ))}
             </div>
           )}
@@ -207,19 +207,19 @@ export default function App() {
 
         <div className={styles.headerRight}>
           <div className={`${styles.pill} ${connected ? styles.pillGreen : styles.pillRed}`}>
-            <span className={`${styles.pillDot} ${connected ? styles.pulseGreen : ''}`} />
+            <span className={`${styles.pillDot} ${connected ? styles.pulseGreen : ''}`}/>
             {connected ? 'BRIDGE LIVE' : 'OFFLINE'}
           </div>
           {callActive && (
             <div className={`${styles.pill} ${styles.pillViolet}`}>
-              <span className={styles.pillDot} style={{background:'#a78bfa', animation:'pulse-dot 1s infinite'}} />
+              <span className={styles.pillDot} style={{background:'#a78bfa', animation:'pulse-dot 1s infinite'}}/>
               ON CALL
             </div>
           )}
           <div className={styles.chips}>
             <div className={styles.chip}>
               <div className={styles.chipLabel}>Pillars</div>
-              <div className={styles.chipVal}>{filled}<span>/15</span></div>
+              <div className={styles.chipVal}>{filled}</div>
             </div>
             <div className={styles.chip}>
               <div className={styles.chipLabel}>Fraud</div>
@@ -232,67 +232,102 @@ export default function App() {
         </div>
       </header>
 
-      {/* ══ LEFT ══════════════════════════════════════════════════ */}
-      <aside className={styles.left}>
-        <Tilt intensity={6}>
-          <Card title="Jamie · AI Agent" accent="#7c3aed">
-            <JamieAvatar speaking={jamieSpeak} callerSpeaking={callerSpeak} mode={mode} />
-          </Card>
-        </Tilt>
+      {/* ══ DEMO CONTEXT BANNER (collapsed once call starts) ═════ */}
+      {!callActive && !transcript.length && (
+        <div className={styles.demoBanner}>
+          <div className={styles.demoLeft}>
+            <span className={styles.demoIcon}>🏢</span>
+            <div>
+              <div className={styles.demoTitle}>Adjuster View — Real-time AI Claims Dashboard</div>
+              <div className={styles.demoDesc}>Jamie AI handles the phone call. This dashboard shows the adjuster everything in real time: transcript, extracted claim data, fraud signals, and location.</div>
+            </div>
+          </div>
+          <div className={styles.demoRight}>
+            <div className={styles.demoStep}>
+              <span className={styles.demoNum}>1</span>
+              <span>Call <strong>+49 30 7567 5681</strong> — or speak into your mic for a local demo</span>
+            </div>
+            <div className={styles.demoStep}>
+              <span className={styles.demoNum}>2</span>
+              <span>Jamie answers, takes the claim, extracts data live</span>
+            </div>
+            <div className={styles.demoStep}>
+              <span className={styles.demoNum}>3</span>
+              <span>Watch pillars tick, fraud signals appear, and the map pin the location</span>
+            </div>
+          </div>
+        </div>
+      )}
 
-        <Tilt intensity={5} className={styles.grow}>
-          <Card title="Live Tool Calls" badge={tools.length||null} accent="#0ea5e9" className={styles.fill}>
-            <ToolFeed tools={tools} />
-          </Card>
-        </Tilt>
+      {/* ══ BODY: left sidebar | centre | right sidebar ═════════ */}
+      <div className={styles.body}>
 
-        {incidentLocation && (
-          <Tilt intensity={4}>
-            <Card title="Detected Location" accent="#f59e0b">
-              <MapPanel location={incidentLocation} />
+        {/* ── LEFT ─────────────────────────────────────────────── */}
+        <aside className={styles.left}>
+          <Tilt intensity={5}>
+            <Card title="Claim Pillars" badge={`${filled}`} glow={glowClaim} accent="#10b981" className={styles.claimCard}>
+              <ClaimProgress pillars={pillars}/>
             </Card>
           </Tilt>
-        )}
-      </aside>
 
-      {/* ══ MAIN ══════════════════════════════════════════════════ */}
-      <main className={styles.main}>
-        <div className={styles.transcriptBar}>
-          <span className={styles.transcriptTitle}>
-            <span className={styles.recDot} /> Live Transcript
-          </span>
-          <span className={styles.msgPill}>{transcript.length} messages</span>
-        </div>
-        <Transcript transcript={transcript} />
-      </main>
+          <Tilt intensity={5}>
+            <Card title="Fraud Risk" glow={glowFraud} accent="#ef4444">
+              <FraudGauge fraud={fraud}/>
+            </Card>
+          </Tilt>
+        </aside>
 
-      {/* ══ RIGHT ══════════════════════════════════════════════════ */}
-      <aside className={styles.right}>
-        <Tilt intensity={5}>
-          <Card title="Claim Pillars" badge={`${filled}/15`} glow={glowClaim} accent="#10b981" className={styles.claimCard}>
-            <ClaimProgress pillars={pillars} />
-          </Card>
-        </Tilt>
+        {/* ── CENTRE ───────────────────────────────────────────── */}
+        <main className={styles.centre}>
 
-        <Tilt intensity={5}>
-          <Card title="Fraud Risk Monitor" glow={glowFraud} accent="#ef4444">
-            <FraudGauge fraud={fraud} />
-          </Card>
-        </Tilt>
+          {/* Stage: Avatars full width */}
+          <div className={styles.stageCard}>
+            <JamieAvatar speaking={jamieSpeak} callerSpeaking={callerSpeak} mode={mode} callerName={callerName}/>
+          </div>
 
-        <Tilt intensity={4}>
-          <Card title="Known Context · CRM" accent="#0ea5e9">
-            <CRMPanel crm={crm} />
-          </Card>
-        </Tilt>
+          {/* Transcript below */}
+          <div className={styles.transcriptPanel}>
+            <div className={styles.transcriptBar}>
+              <span className={styles.transcriptTitle}>
+                <span className={styles.recDot}/>
+                Live Transcript
+              </span>
+              <span className={styles.msgPill}>{transcript.length} messages</span>
+            </div>
+            <Transcript transcript={transcript}/>
+          </div>
+        </main>
 
-        <Tilt intensity={4}>
-          <Card title="Final Claim Export" accent="#a78bfa">
-            <FinalClaim claim={finalClaim} />
-          </Card>
-        </Tilt>
-      </aside>
+        {/* ── RIGHT ─────────────────────────────────────────────── */}
+        <aside className={styles.right}>
+          <Tilt intensity={5}>
+            <Card title="Live Tool Calls" badge={tools.length||null} accent="#0ea5e9">
+              <ToolFeed tools={tools}/>
+            </Card>
+          </Tilt>
 
+          {incidentLocation && (
+            <Tilt intensity={4}>
+              <Card title="Detected Location" accent="#f59e0b">
+                <MapPanel location={incidentLocation}/>
+              </Card>
+            </Tilt>
+          )}
+
+          <Tilt intensity={4}>
+            <Card title="Known Context · CRM" accent="#0ea5e9">
+              <CRMPanel crm={crm}/>
+            </Card>
+          </Tilt>
+
+          <Tilt intensity={4}>
+            <Card title="Final Claim Export" accent="#a78bfa">
+              <FinalClaim claim={finalClaim}/>
+            </Card>
+          </Tilt>
+        </aside>
+
+      </div>
     </div>
   )
 }

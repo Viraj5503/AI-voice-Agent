@@ -1,93 +1,119 @@
-.wrap {
-  display:flex; flex-direction:column; align-items:center;
-  padding:20px 0 10px; gap:20px;
-  width:100%;
-}
-
-/* ── Stage Layout ── */
+/* ── Stage ─────────────────────────────────────────────── */
 .stage {
   display:flex; align-items:flex-start; justify-content:space-between;
-  width:100%; padding:0 12px;
+  width:100%; padding:20px 16px 12px;
+  gap:0;
 }
 
-/* ── Personas ── */
-.persona {
-  display:flex; flex-direction:column; align-items:center; gap:8px;
-  width:110px;
+/* ── Avatar Column ── */
+.avatarCol {
+  display:flex; flex-direction:column; align-items:center; gap:6px;
+  width:120px; flex-shrink:0;
 }
-.personaName { font-size:14px; font-weight:800; color:#0f172a; text-align:center; line-height:1.2; margin-top:4px; }
-.personaRole { font-size:10px; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:1px; }
 
-/* ── Avatar Frames ── */
-.avatarFrame {
-  position:relative; width:90px; height:90px; border-radius:50%;
-  padding:3px;
-  background:rgba(255,255,255,.8);
-  border:1px solid rgba(100,120,200,.2);
-  box-shadow:var(--shadow-sm);
-  transition:all .3s cubic-bezier(.34,1.56,.64,1);
+.name { font-size:13px; font-weight:800; color:#0f172a; text-align:center; line-height:1.2; }
+.role { font-size:9.5px; font-weight:600; color:#7c3aed; letter-spacing:.8px; text-transform:uppercase; }
+
+.statusLine {
+  font-size:9px; font-weight:700; letter-spacing:.6px;
+  color:#94a3b8; transition:color .3s ease;
+}
+.statusActive { color:var(--c, #10b981) !important; }
+
+/* ── Avatar Wrapper ── */
+.avatarWrap {
+  position:relative; width:110px; height:110px;
+  border-radius:50%;
+  /* default idle border */
+  border:3px solid rgba(100,120,200,.15);
+  transition:border-color .3s ease, box-shadow .3s ease, transform .3s cubic-bezier(.34,1.56,.64,1);
   display:flex; align-items:center; justify-content:center;
-  z-index:2;
+}
+
+.avatarWrap.activeSpeaker {
+  border-color:var(--ring, #10b981);
+  box-shadow:0 0 0 4px color-mix(in srgb, var(--ring) 20%, transparent),
+             0 0 24px color-mix(in srgb, var(--ring) 30%, transparent);
+  transform:scale(1.07);
 }
 
 .avatarImg {
   width:100%; height:100%; border-radius:50%;
-  object-fit:cover; object-position:center 15%; /* zoom in slightly past the white border from DALL-E */
+  object-fit:cover; object-position:center 12%;
   background:#f1f5f9;
 }
 
-.statusDot {
-  position:absolute; bottom:0; right:0; width:12px; height:12px;
-  border-radius:50%; border:2px solid #fff;
+/* Pulse rings */
+.ring1, .ring2 {
+  position:absolute; top:-8px; left:-8px; right:-8px; bottom:-8px;
+  border-radius:50%; border:2px solid;
+  pointer-events:none;
+  animation:pulse-ring 1.6s cubic-bezier(.16,1,.3,1) infinite;
+}
+.ring2 {
+  top:-16px; left:-16px; right:-16px; bottom:-16px;
+  animation-delay:.35s; animation-duration:2s;
 }
 
-/* Speaking States */
-.speakingFrameJamie {
-  transform:scale(1.15);
-  border-color:rgba(124,58,237,.5);
-  box-shadow:0 8px 24px rgba(124,58,237,.25), 0 0 0 4px rgba(124,58,237,.1);
-}
-.speakingFrameCaller {
-  transform:scale(1.15);
-  border-color:rgba(14,165,233,.5);
-  box-shadow:0 8px 24px rgba(14,165,233,.25), 0 0 0 4px rgba(14,165,233,.1);
+@keyframes pulse-ring {
+  0%   { transform:scale(.85); opacity:0; }
+  50%  { opacity:1; }
+  100% { transform:scale(1.18); opacity:0; }
 }
 
-/* Pulse Rings */
-.ringJamie, .ringCaller {
-  position:absolute; top:0; left:0; right:0; bottom:0; border-radius:50%;
-  animation:pulse-ring 1.5s cubic-bezier(.16,1,.3,1) infinite;
-  pointer-events:none; z-index:-1;
+/* Speaking badge */
+.speakBadge {
+  position:absolute; bottom:-2px; left:50%; transform:translateX(-50%);
+  padding:2px 8px; border-radius:100px;
+  font-size:8px; font-weight:800; color:#fff; letter-spacing:1px; text-transform:uppercase;
+  white-space:nowrap;
+  box-shadow:0 2px 8px rgba(0,0,0,.2);
+  animation:pop-in .2s cubic-bezier(.34,1.56,.64,1);
 }
-.ringJamie { border:2px solid rgba(124,58,237,.6); }
-.ringCaller { border:2px solid rgba(14,165,233,.6); }
 
-/* ── Waveform Bridge ── */
+/* AI badge on Jamie */
+.aiBadge {
+  position:absolute; top:4px; right:4px;
+  width:20px; height:20px; border-radius:50%;
+  background:linear-gradient(135deg,#7c3aed,#0ea5e9);
+  font-size:7px; font-weight:900; color:#fff;
+  display:flex; align-items:center; justify-content:center;
+  box-shadow:0 2px 6px rgba(124,58,237,.5);
+}
+
+@keyframes pop-in {
+  from { transform:translateX(-50%) scale(.6); opacity:0; }
+  to   { transform:translateX(-50%) scale(1); opacity:1; }
+}
+
+/* ── Bridge ── */
 .bridge {
-  flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center;
-  margin-top:12px; position:relative;
-}
-.wave {
-  display:block; width:100px; height:40px;
-  background:rgba(255,255,255,.4); border-radius:8px;
-  border:1px solid rgba(100,120,200,.1);
-  box-shadow:inset 0 2px 4px rgba(255,255,255,.8);
-}
-.speakLabel {
-  position:absolute; font-size:9px; font-weight:800; letter-spacing:1px;
-  top:-14px; transition:opacity .3s ease;
+  flex:1; display:flex; flex-direction:column; align-items:center;
+  justify-content:center; gap:6px; margin-top:18px;
 }
 
-/* ── Mode Pill ── */
-.modePill {
-  display:flex; align-items:center; gap:6px;
-  padding:5px 14px; border-radius:100px;
-  background:var(--mc2); border:1px solid color-mix(in srgb, var(--mc) 30%, transparent);
-  color:var(--mc); font-size:10px; font-weight:800; letter-spacing:1.5px;
-  box-shadow:0 2px 8px color-mix(in srgb, var(--mc) 10%, transparent);
+.bridgeTop {
+  height:16px; display:flex; align-items:center; justify-content:center;
 }
-.modeDot {
-  width:6px; height:6px; border-radius:50%; background:var(--mc);
-  box-shadow:0 0 6px var(--mc);
-  animation:pulse-dot 1.5s ease-in-out infinite;
+
+.flowLabel {
+  font-size:9px; font-weight:800; letter-spacing:1.5px; text-transform:uppercase;
+  animation:fade-in .2s ease;
 }
+@keyframes fade-in { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
+.wave {
+  display:block; width:160px; height:48px;
+  background:rgba(240,244,255,.5); border-radius:10px;
+  border:1px solid rgba(124,58,237,.1);
+  box-shadow:inset 0 2px 6px rgba(255,255,255,.8);
+}
+
+.modeRow {
+  display:flex; align-items:center; gap:5px;
+  padding:3px 10px; border-radius:100px;
+  background:color-mix(in srgb, var(--mc) 10%, transparent);
+  border:1px solid color-mix(in srgb, var(--mc) 25%, transparent);
+  font-size:9px; font-weight:700; color:var(--mc); letter-spacing:.8px;
+}
+.modeTxt { text-transform:uppercase; letter-spacing:1px; }
