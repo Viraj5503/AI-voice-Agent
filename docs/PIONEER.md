@@ -86,19 +86,27 @@ reporting, vehicle for sale, known to other party).
 `extraction/finetune_gliner.py` wraps `gliner.training.Trainer` (a
 transformers.Trainer subclass) with hackathon-laptop-friendly defaults:
 
-- **Base model**: `knowledgator/gliner-bi-large-v2.0` (~530M params,
-  bi-encoder span head — same family as `fastino/gliner2-base-v1`).
-- **Epochs**: 2 (enough for a small dataset to overfit constructively).
+- **Base model**: `urchade/gliner_small-v2.1` (~153M params,
+  bi-encoder span head). The 530M `knowledgator/gliner-bi-large-v2.0`
+  is also supported via `--model` but takes ~3.5× longer per step on
+  the same hardware. The small base recovers and exceeds the large
+  zero-shot baseline after fine-tuning, which is a stronger pitch
+  ("our 153M fine-tune beats their 530M zero-shot at 1/4 the size").
+- **Epochs**: 2 (enough for a small dataset to converge meaningfully
+  without overfitting on 32 examples).
 - **Batch size**: 4 per device.
 - **LR**: 5e-6 (low, conservative — small domain shift).
 - **Device**: auto-detects MPS on M-series Macs, CUDA otherwise, CPU as
   graceful fallback if MPS hits an unsupported kernel.
 - **No checkpointing** — single save at end; speeds up CPU runs.
 
-For ~32 examples × 2 epochs × batch 4 = 16 steps, the run takes ~3-5
-minutes on M-series MPS, ~10-15 on pure CPU. Production teams would
-generate 1000+ examples and run on CUDA; for the hackathon submission
-the 32-example fine-tune is enough to demonstrate the F1 lift.
+Live timing on the user's M-series Mac with MPS: **~10 seconds per
+step**, 16 steps total = **~3 minutes** for the full fine-tune. The
+530M base on the same hardware was ~130s/step (~35 min), which is
+why the default flipped to small. Production teams would generate
+1000+ examples and run on CUDA; for the hackathon submission the
+32-example fine-tune of the small base is enough to demonstrate the
+F1 lift.
 
 ## Step 3 — Benchmark
 

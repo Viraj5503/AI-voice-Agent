@@ -69,7 +69,14 @@ def main() -> None:
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=5e-6)
     parser.add_argument("--output", default=str(REPO / "models" / "jamie-gliner-v1"))
-    parser.add_argument("--device", choices=["auto", "cpu", "mps", "cuda"], default="auto")
+    parser.add_argument(
+        "--device",
+        choices=["auto", "cpu", "mps", "cuda"],
+        default="cpu",
+        help="auto picks MPS/CUDA where available; cpu is the safe default "
+        "because MPS hit an OOM at step 10/16 mid-training on the same "
+        "153M model on M-series.  Pass --device mps to opt in.",
+    )
     args = parser.parse_args()
 
     data_path = Path(args.data)
