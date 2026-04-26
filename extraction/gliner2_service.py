@@ -166,8 +166,8 @@ class ExtractionService:
 
 
 # ── Emotion detection ─────────────────────────────────────────────────────────
-_RE_DISTRESSED = re.compile(r"\b(pain|hurt|emergency|scared|help|please|crying|ambulance|bleeding|broken|dying|shaking|frightened|chest\s+pain|headache)\b", re.I)
-_RE_NOISY      = re.compile(r"\b(can't\s+hear|loud|background|noise|static|interference|wind|highway|traffic)\b", re.I)
+_RE_DISTRESSED = re.compile(r"\b(pain|hurt|emergency|scared|help|please|crying|ambulance|bleeding|broken|dying|shaking|frightened|chest\s+pain|headache|fracture|surgery|terrible|suffering|agonizing|painful|sick|hurt|injured)\b", re.I)
+_RE_NOISY      = re.compile(r"\b(can't\s+hear|loud|background|noise|static|interference|wind|highway|traffic|bad\s+connection|breaking\s+up|echo)\b", re.I)
 
 def _detect_emotion(text: str) -> str:
     lower = text.lower()

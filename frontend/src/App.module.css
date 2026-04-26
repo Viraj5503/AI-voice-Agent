@@ -10,8 +10,8 @@
 /* ── Header ─────────────────────────────── */
 .header {
   display:flex; align-items:center; justify-content:space-between;
-  padding:0 22px; height:60px; flex-shrink:0;
-  background:rgba(248,249,255,.92);
+  padding:0 22px; height:72px; flex-shrink:0;
+  background:rgba(255, 255, 255, 0.95);
   backdrop-filter:blur(28px) saturate(1.8);
   border-bottom:1px solid rgba(124,58,237,.1);
   box-shadow:0 1px 0 rgba(0,0,0,.05), 0 2px 16px rgba(124,58,237,.06);

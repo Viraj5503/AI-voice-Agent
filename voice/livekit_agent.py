@@ -63,7 +63,7 @@ try:
         cli,
         RoomInputOptions,
     )
-    from livekit.agents.voice import Agent, AgentSession, ParticipantDelayOptions, UserTurn
+    from livekit.agents.voice import Agent, AgentSession
     from livekit.plugins import gradium as lk_gradium
     from livekit.plugins import silero as lk_silero
     _VOICE_DEPS = True
@@ -72,8 +72,9 @@ try:
     try:
         from livekit.plugins import ai_coustics
         _HAVE_AI_COUSTICS = True
-    except ImportError:
+    except Exception as e:
         _HAVE_AI_COUSTICS = False
+        print(f"  [setup] AI Coustics found but failed to load: {e}", file=sys.stderr)
 except Exception as _e:
     _VOICE_DEPS = False
     _voice_import_msg = str(_e)
@@ -321,26 +322,48 @@ async def entrypoint(ctx: JobContext) -> None:
         tts=tts,
         stt=stt,
         vad=vad,
-        # Set a very generous 3s delay to prevent Jamie from jumping in too early.
-        # This solves the "fragmented bubbles" issue by waiting for a full thought.
-        participant_delay_options=ParticipantDelayOptions(
-            end_of_turn_delay=3.0,
-            llm_response_delay=0.5,
-        )
     )
 
     session = AgentSession()
 
-    # ── user turn handler ──────────────────────────────────────────────────
-    @session.on("user_turn_completed")
-    async def on_user_turn(turn: UserTurn) -> None:
-        """Fires only when the user is truly done speaking (after 3s silence)."""
-        text = turn.transcript.strip()
+    # ── user speech handler (manual 3s debounce) ───────────────────────────
+    _turn_lock = asyncio.Lock()
+    _caller_buffer: list[str] = []
+    _caller_timer: asyncio.TimerHandle | None = None
+
+    def _flush_caller() -> None:
+        nonlocal _caller_timer
+        _caller_timer = None
+        if not _caller_buffer:
+            return
+        text = " ".join(_caller_buffer).strip()
+        _caller_buffer.clear()
+        if text:
+            print(f"  [caller] {text}", file=sys.stderr)
+            asyncio.create_task(_handle_caller_turn_locked(text))
+
+    async def _handle_caller_turn_locked(text: str) -> None:
+        async with _turn_lock:
+            await _handle_caller_turn(text)
+
+    @session.on("user_input_transcribed")
+    def on_user_speech(stt_event) -> None:  # type: ignore[no-untyped-def]
+        """Fires every time the caller finishes a chunk (is_final=True).
+        Debounced to ensure the user has fully finished their thought."""
+        nonlocal _caller_timer
+        if not getattr(stt_event, "is_final", True):
+            return
+        text = (getattr(stt_event, "transcript", "") or "").strip()
         if not text:
             return
-            
-        print(f"  [caller] {text}", file=sys.stderr)
-        await _handle_caller_turn(text)
+
+        _caller_buffer.append(text)
+        
+        loop = asyncio.get_running_loop()
+        if _caller_timer is not None:
+            _caller_timer.cancel()
+        # Wait 3.0s of silence before concluding the user turn
+        _caller_timer = loop.call_later(3.0, _flush_caller)
 
     async def _handle_caller_turn(text: str) -> None:
         # 1. Dashboard: caller transcript
