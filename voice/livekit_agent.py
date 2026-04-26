@@ -288,6 +288,27 @@ def build_agent(crm: dict, state: ClaimState):
             })
             return result.get("summary") or "(no towing data)"
 
+        @function_tool
+        async def lookup_traffic(self, location: str) -> str:
+            """Look up live traffic incidents and road closures at the given
+            location.  Use after the caller mentions an Autobahn or major
+            road — gives Jamie a fresh, specific fact like "I see there's
+            a closure on the A4 today" that's far more believable than
+            generic acknowledgments.  Pulls last 24h of German news."""
+            from tools.tavily_lookup import lookup_traffic as _ltr
+            await bridge_publish({
+                "type": "tool_call",
+                "name": "tavily_lookup_traffic",
+                "args": {"location": location},
+            })
+            result = await asyncio.to_thread(_ltr, location)
+            await bridge_publish({
+                "type": "tool_result",
+                "name": "tavily_lookup_traffic",
+                "result": result,
+            })
+            return result.get("summary") or "(no traffic incidents reported)"
+
         async def on_user_turn_completed(  # type: ignore[override]
             self,
             turn_ctx: ChatContext,
@@ -329,17 +350,25 @@ def build_agent(crm: dict, state: ClaimState):
                 })
 
             # Heuristic Tavily fire when LLM-driven tools are disabled
-            # (Ollama path).  The result is folded into the next prompt
-            # refresh via tool_results so Jamie can reference real
-            # conditions even though she didn't "decide" to call the tool.
+            # (Ollama path).  Two parallel lookups — weather AND live
+            # traffic incidents — both grounded to the German news bucket
+            # in the last 24h.  Results fold into the next prompt refresh
+            # via tool_results so Jamie can reference real conditions
+            # ("I see there were heavy rains" / "I see there's a closure
+            # on the A4 today") even though she didn't decide to call.
             if skip_tools and _location_keywords(text):
-                from tools.tavily_lookup import lookup_weather as _lw
+                from tools.tavily_lookup import (
+                    lookup_weather as _lw,
+                    lookup_traffic as _lt,
+                )
+                location_arg = text[:80]
+                # Weather
                 await bridge_publish({
                     "type": "tool_call",
                     "name": "tavily_lookup_weather",
-                    "args": {"location": text[:80]},
+                    "args": {"location": location_arg},
                 })
-                weather = await asyncio.to_thread(_lw, text[:80])
+                weather = await asyncio.to_thread(_lw, location_arg)
                 await bridge_publish({
                     "type": "tool_result",
                     "name": "tavily_lookup_weather",
@@ -348,6 +377,22 @@ def build_agent(crm: dict, state: ClaimState):
                 tool_results.append({
                     "name": "tavily_lookup_weather",
                     "result": weather,
+                })
+                # Traffic
+                await bridge_publish({
+                    "type": "tool_call",
+                    "name": "tavily_lookup_traffic",
+                    "args": {"location": location_arg},
+                })
+                traffic = await asyncio.to_thread(_lt, location_arg)
+                await bridge_publish({
+                    "type": "tool_result",
+                    "name": "tavily_lookup_traffic",
+                    "result": traffic,
+                })
+                tool_results.append({
+                    "name": "tavily_lookup_traffic",
+                    "result": traffic,
                 })
 
             # Refresh Jamie's system prompt with the new claim state.
