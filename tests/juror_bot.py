@@ -1,8 +1,8 @@
 """Automated adversarial Turing harness — text-only.
 
 Runs N simulated calls between Jamie (Gemini-driven) and a juror persona
-played by Anthropic's claude-sonnet-4-6.  At call end, the juror is asked
-to vote: human / ai / unsure, with confidence and reasoning.
+also played by Gemini.  At call end, the juror is asked to vote:
+human / ai / unsure, with confidence and reasoning.
 
 Output:  tests/juror_results.csv  +  tests/juror_results.json
 
@@ -10,6 +10,9 @@ This is the "Nuclear Option" from the game plan but implemented text-only so
 we can iterate on the prompt at H18–H21 without burning Gradium credits.
 Once the prompt is tuned, we re-run a smaller voice version against the live
 LiveKit pipeline.
+
+Note: Originally used Anthropic Claude as the juror LLM.  Switched to
+Gemini (google-genai) so everything runs off the single GOOGLE_API_KEY.
 """
 
 from __future__ import annotations
@@ -84,66 +87,93 @@ def load_crm(name: str) -> dict:
     return json.loads((REPO / "data" / "crm" / f"{name}.json").read_text(encoding="utf-8"))
 
 
-# ----- juror LLM (Anthropic) ------------------------------------------------
-async def _juror_turn(juror_system: str, transcript: list[dict]) -> str:
-    """Get the next caller utterance from the juror LLM."""
-    try:
-        import anthropic  # type: ignore
-    except Exception:
-        return "[juror llm unavailable — install anthropic]"
+# ----- juror LLM (Gemini) ---------------------------------------------------
 
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        # Deterministic stub so the harness still produces output without a key.
+def _gemini_client():
+    """Return a google-genai sync client using GOOGLE_API_KEY."""
+    try:
+        from google import genai  # type: ignore
+        api_key = os.environ.get("GOOGLE_API_KEY", "")
+        if not api_key:
+            return None
+        return genai.Client(api_key=api_key)
+    except Exception:
+        return None
+
+
+_JUROR_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+async def _juror_turn(juror_system: str, transcript: list[dict]) -> str:
+    """Get the next caller utterance from the Gemini juror LLM."""
+    client = _gemini_client()
+    if client is None:
         return f"[stub caller turn #{len(transcript)//2 + 1}]"
 
-    client = anthropic.AsyncAnthropic()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-    msgs = []
-    for t in transcript:
-        # Mirror: Jamie speaks → user role to juror; juror speaks → assistant role
-        role = "user" if t["speaker"] == "jamie" else "assistant"
-        msgs.append({"role": role, "content": t["text"]})
-    if not msgs or msgs[-1]["role"] == "assistant":
-        msgs.append({"role": "user", "content": "(call connects — say something)"})
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=200,
-        system=juror_system,
-        messages=msgs,
-    )
-    return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+    try:
+        from google.genai import types  # type: ignore
+
+        contents = []
+        for t in transcript:
+            # Mirror: Jamie speaks → user role to juror; juror speaks → model role
+            role = "user" if t["speaker"] == "jamie" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part(text=t["text"])]))
+        if not contents or contents[-1].role == "model":
+            contents.append(
+                types.Content(role="user", parts=[types.Part(text="(call connects — say something)")])
+            )
+
+        config = types.GenerateContentConfig(
+            system_instruction=juror_system,
+            temperature=0.9,
+            max_output_tokens=200,
+        )
+        resp = await client.aio.models.generate_content(
+            model=_JUROR_MODEL,
+            contents=contents,
+            config=config,
+        )
+        return (resp.text or "").strip()
+    except Exception as e:
+        return f"[juror error: {str(e)[:80]}]"
 
 
 async def _juror_verdict(juror_system: str, transcript: list[dict]) -> tuple[str, float, str]:
+    client = _gemini_client()
+    if client is None:
+        return "unsure", 0.0, "no GOOGLE_API_KEY — stub run"
+
     try:
-        import anthropic  # type: ignore
-    except Exception:
-        return "unsure", 0.0, "anthropic SDK missing"
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return "unsure", 0.0, "no ANTHROPIC_API_KEY — stub run"
-    client = anthropic.AsyncAnthropic()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
-    convo = "\n".join(f"{t['speaker'].upper()}: {t['text']}" for t in transcript)
-    prompt = (
-        "Below is a transcript of a phone call between you (the juror, role: CALLER) "
-        "and an insurance claims agent (Jamie). Decide whether Jamie was a HUMAN or "
-        "an AI. Respond as strict JSON: {\"verdict\":\"human|ai|unsure\","
-        "\"confidence\":0..1, \"reasoning\":\"…\"}.\n\nTRANSCRIPT:\n" + convo
-    )
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=400,
-        system=juror_system,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
-    try:
+        from google.genai import types  # type: ignore
+
+        convo = "\n".join(f"{t['speaker'].upper()}: {t['text']}" for t in transcript)
+        prompt = (
+            "Below is a transcript of a phone call between you (the juror, role: CALLER) "
+            "and an insurance claims agent (Jamie). Decide whether Jamie was a HUMAN or "
+            'an AI. Respond as strict JSON: {"verdict":"human|ai|unsure",'
+            '"confidence":0..1, "reasoning":"…"}.\n\nTRANSCRIPT:\n' + convo
+        )
+        config = types.GenerateContentConfig(
+            system_instruction=juror_system,
+            temperature=0.2,
+            max_output_tokens=400,
+        )
+        resp = await client.aio.models.generate_content(
+            model=_JUROR_MODEL,
+            contents=[types.Content(role="user", parts=[types.Part(text=prompt)])],
+            config=config,
+        )
+        text = (resp.text or "").strip()
         # Cope with code-fenced JSON
         text_clean = text.strip("` \n").lstrip("json").strip()
         data = json.loads(text_clean[text_clean.find("{") : text_clean.rfind("}") + 1])
-        return str(data.get("verdict", "unsure")), float(data.get("confidence", 0.0)), str(data.get("reasoning", ""))
-    except Exception:
-        return "unsure", 0.0, text[:300]
+        return (
+            str(data.get("verdict", "unsure")),
+            float(data.get("confidence", 0.0)),
+            str(data.get("reasoning", "")),
+        )
+    except Exception as e:
+        return "unsure", 0.0, str(e)[:300]
 
 
 # ----- one simulated call --------------------------------------------------

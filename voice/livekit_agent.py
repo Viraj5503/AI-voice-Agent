@@ -1,7 +1,7 @@
-"""Production voice agent — LiveKit + Deepgram STT + Gradium TTS + GeminiBrain.
+"""Production voice agent — LiveKit + Gradium STT/TTS + GeminiBrain.
 
 Architecture (proven working for phone calls):
-  - Deepgram STT  — Gradium STT was silently hanging; Deepgram is reliable
+  - Gradium STT   — temperature=0.0 suppresses Whisper noise hallucination
   - Gradium TTS   — Emma voice with warmth tuning
   - Silero VAD    — turn detection
   - GeminiBrain   — custom streaming LLM (gemini-2.5-flash), NOT the livekit
@@ -11,14 +11,13 @@ Architecture (proven working for phone calls):
 Event flow:
   Twilio call → LiveKit SIP trunk (bbh-inca-n9i26bo3.sip.livekit.cloud)
   → Dispatch rule creates room → worker joins
-  → Deepgram transcribes → user_input_transcribed fires
+  → Gradium STT transcribes → user_input_transcribed fires
   → GeminiBrain streams reply → session.say() speaks it
   → GLiNER2 extracts entities → WebSocket bridge → dashboard
 
 Env vars required (all in .env):
     GOOGLE_API_KEY, GEMINI_MODEL
     GRADIUM_API_KEY, GRADIUM_VOICE_ID
-    DEEPGRAM_API_KEY
     LIVEKIT_URL, LIVEKIT_API_KEY, LIVEKIT_API_SECRET
     TWILIO_ACCOUNT_SID, TWILIO_API_KEY_SID, TWILIO_API_KEY_SECRET, TWILIO_PHONE_NUMBER
     DEMO_CRM_PROFILE  (default: max_mueller)
@@ -62,7 +61,6 @@ try:
         cli,
     )
     from livekit.agents.voice import Agent, AgentSession
-    from livekit.plugins import deepgram as lk_deepgram
     from livekit.plugins import gradium as lk_gradium
     from livekit.plugins import silero as lk_silero
     _VOICE_DEPS = True
@@ -87,17 +85,13 @@ def _check_env() -> None:
         print(f"  ⚠ Missing Twilio env vars: {', '.join(missing)}", file=sys.stderr)
         print("    Phone calls will not be routed correctly.", file=sys.stderr)
 
-    if not os.environ.get("DEEPGRAM_API_KEY"):
-        print("  ✗ DEEPGRAM_API_KEY not set — STT will fail!", file=sys.stderr)
-        print("    Get a free key at https://console.deepgram.com/", file=sys.stderr)
+    if not os.environ.get("GRADIUM_API_KEY"):
+        print("  ✗ GRADIUM_API_KEY not set — STT/TTS will fail!", file=sys.stderr)
         sys.exit(1)
 
     if not os.environ.get("GOOGLE_API_KEY"):
         print("  ⚠ GOOGLE_API_KEY not set — GeminiBrain will use stub replies",
               file=sys.stderr)
-
-    if not os.environ.get("GRADIUM_API_KEY"):
-        print("  ⚠ GRADIUM_API_KEY not set — TTS will fail!", file=sys.stderr)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
@@ -233,7 +227,9 @@ async def entrypoint(ctx: JobContext) -> None:
     # we get per-turn CRM context + claim state injection.  The Agent object
     # here is purely an audio pipeline shell (STT / TTS / VAD).
     vad = lk_silero.VAD.load()
-    stt = lk_deepgram.STT()            # reliable; Gradium STT was hanging
+    # temperature=0.0 suppresses Whisper-style noise hallucinations
+    # ("Marama", "Thank you", "I live in Chicago" from background ambient sound)
+    stt = lk_gradium.STT(temperature=0.0)
     tts = lk_gradium.TTS(**tts_kwargs)
 
     agent = Agent(
@@ -337,8 +333,7 @@ def main() -> None:
     if not _VOICE_DEPS:
         print(
             "livekit-agents not installed.\n\n"
-            '    pip install "livekit-agents[gradium,google,silero]>=1.4,<2.0"\n'
-            "    pip install livekit-plugins-deepgram\n\n"
+            '    pip install "livekit-agents[gradium,google,silero]>=1.4,<2.0"\n\n'
             f"(import error: {_voice_import_msg})"
         )
         sys.exit(2)
