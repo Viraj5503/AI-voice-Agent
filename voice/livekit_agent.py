@@ -182,6 +182,14 @@ def build_session(crm: dict, state: ClaimState):
     if voice_id:
         tts_kwargs["voice_id"] = voice_id
 
+    # Custom pronunciation dictionary — set up via scripts/setup_pronunciations.py.
+    # Forces "FNOL" → "eff-noll", "DSGVO" → German lettering, "Vollkasko" with
+    # native German stress, etc.  Real insurance pros pattern-match these
+    # acronyms instantly; getting them wrong is a ~free Turing-test "AI" vote.
+    pron_id = os.environ.get("GRADIUM_PRONUNCIATION_ID") or None
+    if pron_id:
+        tts_kwargs["pronunciation_id"] = pron_id
+
     # Gradium STT — temperature=0.0 stops Whisper-style noise hallucination
     # ("Marama", "Englishman", "I live in Chicago" appearing from background
     # ambient sound).  vad_threshold 0.9 / vad_bucket 2 are SDK defaults.
