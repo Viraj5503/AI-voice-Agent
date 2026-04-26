@@ -72,8 +72,9 @@ try:
     try:
         from livekit.plugins import ai_coustics
         _HAVE_AI_COUSTICS = True
-    except ImportError:
+    except Exception as e:
         _HAVE_AI_COUSTICS = False
+        print(f"  [setup] AI Coustics found but failed to load: {e}", file=sys.stderr)
 except Exception as _e:
     _VOICE_DEPS = False
     _voice_import_msg = str(_e)

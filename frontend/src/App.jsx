@@ -215,12 +215,8 @@ export default function App() {
 
       {/* ══ HEADER ════════════════════════════════════════════════ */}
       <header className={styles.header}>
-        <div className={styles.brand}>
-          <div className={styles.logo}><span>V</span></div>
-          <div>
-            <div className={styles.brandName}>VORSICHT <em>Claims</em></div>
-            <div className={styles.brandSub}>AI Claims Intake · Adjuster Dashboard</div>
-          </div>
+        <div className={styles.brand} onClick={() => window.location.reload()} style={{ cursor: 'pointer' }}>
+          <img src="/logo.png" alt="EchoClaim Logo" style={{ height: '56px', width: 'auto', display: 'block', padding: '4px 0' }} />
         </div>
 
         <div className={styles.headerMid}>
