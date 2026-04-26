@@ -1,20 +1,20 @@
 [
   {
     "name": "GLiNER zero-shot (gliner: knowledgator/gliner-bi-large-v2.0)",
-    "latency_ms": 837.0,
+    "latency_ms": 300.0,
     "cost_per_call_usd": 0.0,
     "f1": 0.317
   },
   {
     "name": "GLiNER fine-tuned (jamie-fnol → jamie-gliner-v1)",
-    "latency_ms": 116.1,
+    "latency_ms": 69.3,
     "cost_per_call_usd": 0.0,
-    "f1": 0.476
+    "f1": 0.609
   },
   {
-    "name": "Gemini structured (gemini-flash-latest)",
-    "latency_ms": 4623.5,
+    "name": "Gemini structured (gemini-2.5-flash)",
+    "latency_ms": 2729.4,
     "cost_per_call_usd": 0.0015,
-    "f1": 0.832
+    "f1": 0.863
   }
 ]

@@ -59,8 +59,10 @@ try:
         JobContext,
         WorkerOptions,
         cli,
+        RoomInputOptions,
     )
     from livekit.agents.voice import Agent, AgentSession
+    from livekit.plugins import ai_coustics
     from livekit.plugins import gradium as lk_gradium
     from livekit.plugins import silero as lk_silero
     _VOICE_DEPS = True
@@ -226,7 +228,7 @@ async def entrypoint(ctx: JobContext) -> None:
     # NOTE: We pass NO `llm=` here. GeminiBrain handles LLM logic manually so
     # we get per-turn CRM context + claim state injection.  The Agent object
     # here is purely an audio pipeline shell (STT / TTS / VAD).
-    vad = lk_silero.VAD.load()
+    vad = ai_coustics.VAD()
     # Gradium STT — three knobs working together to stop the live
     # fragment-as-turn segmentation issue (one continuous statement
     # producing 3-4 separate user_input_transcribed events with
@@ -326,8 +328,21 @@ async def entrypoint(ctx: JobContext) -> None:
         history.append({"role": "model", "text": reply})
 
     # ── start the session and speak the opener ─────────────────────────────
+    # Use AI-coustics to suppress highway/background noise for INCA challenge
+    room_input_options = RoomInputOptions(
+        noise_cancellation=ai_coustics.audio_enhancement(
+            model=ai_coustics.EnhancerModel.QUAIL_VF_L,
+            model_parameters=ai_coustics.ModelParameters(enhancement_level=0.8),
+            vad_settings=ai_coustics.VadSettings(
+                speech_hold_duration=0.03,
+                sensitivity=6.0,
+                minimum_speech_duration=0.0,
+            )
+        )
+    )
+
     agent_task = asyncio.create_task(
-        session.start(agent, room=ctx.room)
+        session.start(agent, room=ctx.room, room_input_options=room_input_options)
     )
 
     # Small pause to let the audio pipeline initialise before speaking
