@@ -1,19 +1,19 @@
-"""GLiNER2 zero-shot extractor for FNOL transcripts.
+"""GLiNER2 zero-shot extractor — Auto AND Health claims.
 
-Primary model:   fastino/gliner2-base-v1   (Pioneer-aligned)
-Fallback model:  knowledgator/gliner-bi-large-v2.0  (community baseline)
+Strategy (bi-encoder specific):
+  knowledgator/gliner-bi-large-v2.0 uses embedding similarity, so label
+  phrases must be SHORT and CONCRETE — the model scores cosine similarity
+  between the label embedding and each token span.  Long descriptive labels
+  score near-zero because they dilute the embedding signal.
 
-We expose two surfaces:
+  We therefore:
+    1. Run GLiNER with short labels at a low threshold (0.22).
+    2. Run the regex/heuristic extractor IN PARALLEL as an additive layer.
+    3. Merge both results — keep the higher confidence per pillar.
 
-  ExtractionService.extract(text) -> dict
-      Pull the claim pillars + fraud signals out of one transcript chunk.
-
-  run_async_extractor(stream, on_update)
-      Long-running coroutine that consumes a transcript stream and pushes
-      pillar updates to a callback (the bridge fan-out, in production).
-
-If `gliner` is not installed (e.g. in CI), the service falls back to a regex
-heuristic extractor so the rest of the pipeline still works.
+  This gives us:
+    - GLiNER for fuzzy/semantic matching (Dr. Schmidt → provider_name)
+    - Regex for high-precision structural patterns (14:30, K-AB 1234, A4)
 """
 
 from __future__ import annotations
@@ -25,69 +25,53 @@ from collections.abc import AsyncIterator, Callable, Awaitable
 from dataclasses import dataclass
 from typing import Any
 
-# GLiNER works best with NATURAL-LANGUAGE entity labels, not snake_case.
-# We keep the canonical pillar IDs (snake_case, used everywhere else in the
-# codebase) and a parallel list of human-readable phrasings GLiNER actually
-# understands.  predict_entities() uses the human labels; we map back to
-# the canonical IDs before returning.
-CLAIM_LABELS: list[str] = [
-    "accident_date",
-    "accident_time",
-    "accident_location",
-    "road_type",
-    "weather_conditions",
-    "other_party_plate",
-    "other_party_name",
-    "other_party_insurer",
-    "police_case_number",
-    "injury_description",
-    "vehicle_drivable",
-    "fault_admission",
-    "witness_name",
-    "damage_description",
-    "settlement_preference",
-]
+# ── GLiNER label vocabulary (SHORT is better for bi-encoder) ─────────────────
+# Rule: every canonical ID MUST match a key in ClaimState.PILLARS,
+#       gliner2_service.HUMAN_TO_ID, and ClaimProgress.jsx PILLARS list.
 
-# Human-readable label → canonical ID.  These phrasings are what we feed
-# into GLiNER.predict_entities() — bi-encoder GLiNERs match the entity
-# label embedding against text embeddings, so vague snake_case labels
-# (police_case_number) match almost nothing while "police case number"
-# matches reliably.  Threshold also drops from 0.45 → 0.30 because the
-# bi-encoder's natural similarities run lower than the cross-encoder's.
 HUMAN_TO_ID: dict[str, str] = {
-    "date of the accident":        "accident_date",
-    "time of the accident":        "accident_time",
-    "accident location":           "accident_location",
-    "road type":                   "road_type",
-    "weather conditions":          "weather_conditions",
-    "other vehicle license plate": "other_party_plate",
-    "other driver's name":         "other_party_name",
-    "other party insurer":         "other_party_insurer",
-    "police case number":          "police_case_number",
-    "injury":                      "injury_description",
-    "vehicle drivable":            "vehicle_drivable",
-    "admission of fault":          "fault_admission",
-    "witness name":                "witness_name",
-    "vehicle damage":              "damage_description",
-    "preferred repair shop":       "settlement_preference",
+    # Universal
+    "claim type":               "claim_type",
+    "auto or health claim":     "claim_type",
+    "date":                     "incident_datetime",
+    "time":                     "incident_datetime",
+    "location":                 "incident_location",
+    "address":                  "incident_location",
+    "injury":                   "injuries_or_symptoms",
+    "symptom":                  "injuries_or_symptoms",
+    "pain":                     "injuries_or_symptoms",
+    "what happened":            "how_it_happened",
+    "incident description":     "how_it_happened",
+
+    # Health-specific
+    "medical treatment":        "treatment_received",
+    "doctor":                   "provider_name",
+    "hospital":                 "provider_name",
+    "clinic":                   "provider_name",
+
+    # Auto-specific
+    "vehicle drivable":         "vehicle_drivable",
+    "car drivable":             "vehicle_drivable",
+    "license plate":            "other_party_plate",
+    "other party insurer":      "other_party_insurer",
+    "fault":                    "fault_admission",
+    "witness":                  "witnesses",
+    "repair shop":              "settlement_preference",
+    "reimbursement preference": "settlement_preference",
+    "police":                   "police_or_ambulance",
+    "ambulance":                "police_or_ambulance",
+    "police case number":       "police_case_number",
 }
 
-FRAUD_LABELS: list[str] = [
-    "delayed_reporting",
-    "known_to_other_party",
-    "vehicle_listed_for_sale",
-    "prior_similar_incident",
-    "timeline_inconsistency",
-]
-
 FRAUD_HUMAN_TO_ID: dict[str, str] = {
-    "delayed reporting":              "delayed_reporting",
-    "known relationship to other party": "known_to_other_party",
+    "delayed reporting":               "delayed_reporting",
+    "known relationship other party":  "known_to_other_party",
     "vehicle listed for sale":         "vehicle_listed_for_sale",
     "prior similar incident":          "prior_similar_incident",
     "timeline inconsistency":          "timeline_inconsistency",
 }
 
+FRAUD_IDS = set(FRAUD_HUMAN_TO_ID.values())
 
 _MODEL_CANDIDATES = [
     "fastino/gliner2-base-v1",
@@ -103,10 +87,19 @@ class Extraction:
     score: float
 
 
-class ExtractionService:
-    """Wraps GLiNER2 with sane defaults and a regex fallback."""
+def _merge(base: dict[str, Extraction], overlay: dict[str, Extraction]) -> dict[str, Extraction]:
+    """Merge two extraction dicts, keeping the higher-confidence value per key."""
+    merged = dict(base)
+    for k, v in overlay.items():
+        if k not in merged or merged[k].score < v.score:
+            merged[k] = v
+    return merged
 
-    def __init__(self, model_name: str | None = None, threshold: float = 0.30) -> None:
+
+class ExtractionService:
+    """Wraps GLiNER2 + regex fallback with merge strategy."""
+
+    def __init__(self, model_name: str | None = None, threshold: float = 0.22) -> None:
         self.threshold = threshold
         self.model_name: str | None = None
         self._model: Any = None
@@ -114,7 +107,6 @@ class ExtractionService:
 
         try:
             from gliner import GLiNER  # type: ignore
-
             for candidate in ([model_name] if model_name else _MODEL_CANDIDATES):
                 if not candidate:
                     continue
@@ -126,62 +118,59 @@ class ExtractionService:
                 except Exception:
                     continue
         except Exception:
-            # gliner not installed at all — stay in stub mode
             self._model = None
 
     @property
     def mode(self) -> str:
-        """'gliner' if a real model is loaded, else 'stub'."""
         return self._mode
 
-    # -----------------------------------------------------------------
     def extract(self, text: str) -> dict[str, Any]:
-        """Pull pillar + fraud entities from one transcript chunk."""
+        """Run GLiNER + regex, merge results, return unified pillar/fraud dict."""
         t0 = time.perf_counter()
-        pillars: dict[str, Extraction] = {}
-        fraud: dict[str, Extraction] = {}
+        gliner_pillars:  dict[str, Extraction] = {}
+        gliner_fraud:    dict[str, Extraction] = {}
 
+        # ── 1. GLiNER semantic pass ───────────────────────────────────────────
         if self._mode == "gliner" and self._model is not None:
-            # Feed GLiNER the natural-language phrasings; map back to canonical IDs.
-            human_labels = list(HUMAN_TO_ID.keys()) + list(FRAUD_HUMAN_TO_ID.keys())
-            ents = self._model.predict_entities(
-                text, human_labels, threshold=self.threshold
-            )
-            for e in ents:
-                human = e["label"]
-                lab = HUMAN_TO_ID.get(human) or FRAUD_HUMAN_TO_ID.get(human)
-                if not lab:
-                    continue
-                ex = Extraction(label=lab, text=e["text"], score=float(e.get("score", 0.0)))
-                bucket = fraud if lab in FRAUD_LABELS else pillars
-                # keep highest-confidence per label
-                if lab not in bucket or bucket[lab].score < ex.score:
-                    bucket[lab] = ex
-        else:
-            # regex / heuristic fallback so pipeline still runs in dev
-            for lab, ext in _stub_extract(text):
-                bucket = fraud if lab in FRAUD_LABELS else pillars
-                if lab not in bucket or bucket[lab].score < ext.score:
-                    bucket[lab] = ext
+            all_labels = list(HUMAN_TO_ID.keys()) + list(FRAUD_HUMAN_TO_ID.keys())
+            try:
+                ents = self._model.predict_entities(text, all_labels, threshold=self.threshold)
+                for e in ents:
+                    human = e["label"]
+                    lab = HUMAN_TO_ID.get(human) or FRAUD_HUMAN_TO_ID.get(human)
+                    if not lab:
+                        continue
+                    ex = Extraction(label=lab, text=e["text"], score=float(e.get("score", 0.0)))
+                    bucket = gliner_fraud if lab in FRAUD_IDS else gliner_pillars
+                    if lab not in bucket or bucket[lab].score < ex.score:
+                        bucket[lab] = ex
+            except Exception as gliner_err:
+                print(f"  [gliner] predict error: {gliner_err}")
+
+        # ── 2. Regex structural pass (always runs — additive, not fallback) ──
+        regex_pillars, regex_fraud = _regex_extract(text)
+
+        # ── 3. Merge: higher confidence wins per label ────────────────────────
+        final_pillars = _merge(gliner_pillars, regex_pillars)
+        final_fraud   = _merge(gliner_fraud,   regex_fraud)
 
         elapsed_ms = (time.perf_counter() - t0) * 1000
         return {
-            "pillars": {k: v.__dict__ for k, v in pillars.items()},
-            "fraud": {k: v.__dict__ for k, v in fraud.items()},
+            "pillars":    {k: v.__dict__ for k, v in final_pillars.items()},
+            "fraud":      {k: v.__dict__ for k, v in final_fraud.items()},
             "elapsed_ms": round(elapsed_ms, 2),
-            "mode": self._mode,
-            "model": self.model_name,
+            "mode":       self._mode,
+            "model":      self.model_name,
         }
 
 
-# ----- async streaming wrapper --------------------------------------------
+# ── Async streaming wrapper ───────────────────────────────────────────────────
 async def run_async_extractor(
     transcript_stream: AsyncIterator[str],
     on_update: Callable[[dict[str, Any]], Awaitable[None]],
     chunk_words: int = 20,
     service: ExtractionService | None = None,
 ) -> None:
-    """Consume a stream of transcript text and emit extraction events."""
     svc = service or ExtractionService()
     buffer: list[str] = []
     async for piece in transcript_stream:
@@ -189,65 +178,114 @@ async def run_async_extractor(
         words = " ".join(buffer).split()
         if len(words) < chunk_words:
             continue
-        chunk = " ".join(words[-chunk_words * 2 :])  # short rolling context
+        chunk = " ".join(words[-chunk_words * 2:])
         result = await asyncio.to_thread(svc.extract, chunk)
         if result["pillars"] or result["fraud"]:
             await on_update(result)
-        # don't reset; we keep a rolling buffer so split entities aren't lost
         buffer = [chunk]
 
 
-# ----- regex fallback so this module is useful before the model downloads -
-_RE_PLATE = re.compile(r"\b([A-ZÄÖÜ]{1,3}-[A-Z]{1,2}\s?\d{1,4})\b")
-_RE_DATE = re.compile(r"\b(\d{1,2}\.\d{1,2}\.\d{2,4}|today|yesterday)\b", re.I)
-_RE_TIME = re.compile(r"\b(\d{1,2}:\d{2})\b")
-_RE_AUTOBAHN = re.compile(r"\b(A\d{1,3}|B\d{1,3}|Bundesstraße\s?\d+)\b")
-_RE_INJURY = re.compile(
-    r"\b(whiplash|broken\s\w+|bleeding|hospital|ambulance|hurt|injured|"
-    r"Schmerz|verletzt|Krankenhaus)\b",
-    re.I,
-)
-_RE_DRIVABLE_NEG = re.compile(r"\b(not\s+drivable|kann\s+nicht\s+fahren|totaled?)\b", re.I)
-_RE_DRIVABLE_POS = re.compile(r"\b(drivable|still\s+drives|still\s+drove\s+home)\b", re.I)
-_RE_POLICE = re.compile(r"\b(police|Polizei|case\s+number\s*[:#]?\s*\w+)\b", re.I)
-_RE_WEATHER = re.compile(r"\b(rain|snow|fog|ice|sun|clear|storm|Regen|Schnee|Eis)\b", re.I)
-_RE_DELAY = re.compile(r"\b(\d+)\s+(weeks?|months?|days?)\s+ago\b", re.I)
+# ── Regex / heuristic extractor ───────────────────────────────────────────────
+# These fire on high-precision structural patterns that GLiNER often misses:
+# timestamps, license plates, A-road codes, medical keywords, etc.
+_RE_DATE        = re.compile(r"\b(\d{1,2}[./]\d{1,2}[./]\d{2,4}|today|yesterday|last\s+\w+day)\b", re.I)
+_RE_TIME        = re.compile(r"\b(\d{1,2}:\d{2}(?:\s*[ap]m)?)\b", re.I)
+_RE_LOCATION    = re.compile(r"\b(A\d{1,3}|B\d{1,3}|Autobahn|[A-Z][a-z]+(straße|strasse|street|road|avenue|ave|blvd|platz|gasse))\b", re.I)
+_RE_CITY        = re.compile(r"\b(Berlin|München|Munich|Hamburg|Frankfurt|Köln|Cologne|Stuttgart|Düsseldorf|Leipzig|Dortmund|Essen|Bremen|Dresden|Hannover)\b", re.I)
+_RE_HOSPITAL    = re.compile(r"\b(hospital|clinic|medical\s+cent(?:er|re)|Krankenhaus|Klinik|ER|emergency\s+room|Notaufnahme)\b", re.I)
+_RE_DOCTOR      = re.compile(r"\bDr\.?\s+[A-Z][a-z]+\b|\b(doctor|physician|specialist|surgeon|GP|general\s+practitioner)\b", re.I)
+_RE_INJURY      = re.compile(r"\b(whiplash|fracture|broken|bleeding|concussion|bruise|burn|sprain|chest\s+pain|headache|fever|nausea|dizziness|surgery|ambulance|hurt|pain|injured|Schmerz|verletzt|Kopfschmerzen|Fieber)\b", re.I)
+_RE_TREATMENT   = re.compile(r"\b(surgery|operation|stitches|X-?ray|MRI|CT\s+scan|medication|prescription|physiotherapy|rehab|treatment|Behandlung|Operation|Medikament)\b", re.I)
+_RE_PLATE       = re.compile(r"\b([A-ZÄÖÜ]{1,3}[-\s][A-Z]{1,2}\s?\d{1,4})\b")
+_RE_DRIVABLE_NO = re.compile(r"\b(not\s+drivable|cannot\s+drive|totaled?|write[-\s]off|kann\s+nicht\s+fahren|Totalschaden)\b", re.I)
+_RE_DRIVABLE_OK = re.compile(r"\b(still\s+drivable|still\s+drives?|drove\s+home|fahrtüchtig)\b", re.I)
+_RE_POLICE      = re.compile(r"\b(police|Polizei|cops|officers?)\b", re.I)
+_RE_AMBULANCE   = re.compile(r"\b(ambulance|paramedic|Rettungswagen|Notarzt)\b", re.I)
+_RE_POLICE_NUM  = re.compile(r"\b(?:case|reference|report)\s*(?:number|no\.?|#)?\s*[:#]?\s*(\w{4,})\b", re.I)
+_RE_FAULT       = re.compile(r"\b(my fault|their fault|I caused|they caused|ran the red|Schuld|verschuldet)\b", re.I)
+_RE_WITNESS     = re.compile(r"\b(witness(?:es)?|bystander|passerby|Zeuge)\b", re.I)
+_RE_CLAIM_AUTO  = re.compile(r"\b(car|auto|vehicle|automobile|accident|crash|collision|KFZ|Unfall|Fahrzeug)\b", re.I)
+_RE_CLAIM_HEALTH= re.compile(r"\b(health\s+insurance|medical\s+claim|illness|sick|Krankenkasse|Krankenversicherung|Gesundheit)\b", re.I)
+_RE_DELAY       = re.compile(r"\b(\d+)\s+(weeks?|months?|days?)\s+ago\b", re.I)
+_RE_SETTLEMENT  = re.compile(r"\b(repair\s+shop|body\s+shop|reimburs|direct\s+payment|Werkstatt|Erstattung)\b", re.I)
 
 
-def _stub_extract(text: str) -> list[tuple[str, Extraction]]:
-    out: list[tuple[str, Extraction]] = []
-    for m in _RE_PLATE.finditer(text):
-        out.append(("other_party_plate", Extraction("other_party_plate", m.group(1), 0.6)))
+def _regex_extract(text: str) -> tuple[dict[str, Extraction], dict[str, Extraction]]:
+    pillars: dict[str, Extraction] = {}
+    fraud:   dict[str, Extraction] = {}
+
+    def add(d: dict, key: str, val: str, score: float) -> None:
+        if key not in d or d[key].score < score:
+            d[key] = Extraction(key, val, score)
+
+    # claim_type — detect early so downstream can branch
+    if _RE_CLAIM_HEALTH.search(text):
+        add(pillars, "claim_type", "health", 0.70)
+    if _RE_CLAIM_AUTO.search(text):
+        # only overwrite if not already marked health
+        if "claim_type" not in pillars:
+            add(pillars, "claim_type", "auto", 0.65)
+
+    # incident_datetime
     for m in _RE_DATE.finditer(text):
-        out.append(("accident_date", Extraction("accident_date", m.group(1), 0.5)))
+        add(pillars, "incident_datetime", m.group(1), 0.72)
     for m in _RE_TIME.finditer(text):
-        out.append(("accident_time", Extraction("accident_time", m.group(1), 0.5)))
-    for m in _RE_AUTOBAHN.finditer(text):
-        out.append(("road_type", Extraction("road_type", m.group(1), 0.7)))
-        out.append(("accident_location", Extraction("accident_location", m.group(1), 0.6)))
+        add(pillars, "incident_datetime", m.group(1), 0.68)
+
+    # incident_location — roads, cities, hospitals
+    for m in _RE_LOCATION.finditer(text):
+        add(pillars, "incident_location", m.group(0), 0.75)
+    for m in _RE_CITY.finditer(text):
+        add(pillars, "incident_location", m.group(0), 0.60)
+    for m in _RE_HOSPITAL.finditer(text):
+        add(pillars, "incident_location", m.group(0), 0.65)
+
+    # injuries_or_symptoms
     for m in _RE_INJURY.finditer(text):
-        out.append(("injury_description", Extraction("injury_description", m.group(0), 0.7)))
-    for m in _RE_DRIVABLE_NEG.finditer(text):
-        out.append(("vehicle_drivable", Extraction("vehicle_drivable", "no", 0.6)))
-    for m in _RE_DRIVABLE_POS.finditer(text):
-        out.append(("vehicle_drivable", Extraction("vehicle_drivable", "yes", 0.6)))
-    for m in _RE_POLICE.finditer(text):
-        out.append(("police_case_number", Extraction("police_case_number", m.group(0), 0.5)))
-    for m in _RE_WEATHER.finditer(text):
-        out.append(("weather_conditions", Extraction("weather_conditions", m.group(0), 0.6)))
+        add(pillars, "injuries_or_symptoms", m.group(0), 0.78)
+
+    # treatment_received
+    for m in _RE_TREATMENT.finditer(text):
+        add(pillars, "treatment_received", m.group(0), 0.72)
+
+    # provider_name (doctor / hospital)
+    for m in _RE_DOCTOR.finditer(text):
+        add(pillars, "provider_name", m.group(0), 0.80)
+    for m in _RE_HOSPITAL.finditer(text):
+        add(pillars, "provider_name", m.group(0), 0.68)
+
+    # vehicle-specific
+    for m in _RE_PLATE.finditer(text):
+        add(pillars, "other_party_plate", m.group(1), 0.85)
+    for m in _RE_DRIVABLE_NO.finditer(text):
+        add(pillars, "vehicle_drivable", "no", 0.80)
+    for m in _RE_DRIVABLE_OK.finditer(text):
+        add(pillars, "vehicle_drivable", "yes", 0.75)
+    for m in _RE_SETTLEMENT.finditer(text):
+        add(pillars, "settlement_preference", m.group(0), 0.65)
+
+    # police / ambulance
+    if _RE_POLICE.search(text):
+        add(pillars, "police_or_ambulance", "police", 0.78)
+    if _RE_AMBULANCE.search(text):
+        add(pillars, "police_or_ambulance", "ambulance", 0.80)
+    for m in _RE_POLICE_NUM.finditer(text):
+        add(pillars, "police_case_number", m.group(1), 0.82)
+
+    # fault / witness
+    for m in _RE_FAULT.finditer(text):
+        add(pillars, "fault_admission", m.group(0), 0.78)
+    for m in _RE_WITNESS.finditer(text):
+        add(pillars, "witnesses", m.group(0), 0.65)
+
+    # fraud signals
     for m in _RE_DELAY.finditer(text):
-        out.append(("delayed_reporting", Extraction("delayed_reporting", m.group(0), 0.6)))
-    return out
+        add(fraud, "delayed_reporting", m.group(0), 0.70)
+
+    return pillars, fraud
 
 
-# --- self-test -------------------------------------------------------------
+# ── self-test ─────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    import json
-    svc = ExtractionService()
-    print("mode:", svc.mode, "model:", svc.model_name)
-    sample = (
-        "I was on the A4 around 14:30 today, it was pouring rain, "
-        "and the other guy had a plate K-AB 1234. I think I have whiplash. "
-        "The police came, the case number is 2026-04-25-7711."
-    )
-    print(json.dumps(svc.extract(sample), indent=2, ensure_ascii=False))
+    # Run: .venv/bin/python tests/test_extraction.py
+    pass
