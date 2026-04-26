@@ -46,9 +46,9 @@ End the cut showing the FINAL CLAIM EXPORT panel with the JSON.
 
 ---
 
-## Slide 4 · Side bounties + close (1:44 – 1:58)
+## Slide 4 · Beyond the conversation (1:44 – 1:58)
 
-> *"Side challenges, woven in. Aikido — twelve PII patterns redacted because insurance is GDPR Article 9 health data. Entire wrote our build journal as we built. Gradium runs in three integration tiers, all real. Pioneer's GLiNER2 is the speed lane: 47 milliseconds versus 300 for Gemini-Lite — the benchmark is in the repo. EchoClaim. github dot com slash IamHetPatel slash AI dash voice dash Agent."*
+> *"Beyond the conversation itself, four things we built around it. Twelve PII patterns redacted before anything touches a log — insurance is GDPR Article 9 health data. A build journal that captures why every decision was made, not just what changed. Voice that runs in three tiers — laptop, direct SDK, production telephony — all on the same voice. And two extraction lanes: forty-seven milliseconds free on-device for speed, three hundred milliseconds structured-output for accuracy. EchoClaim. github dot com slash IamHetPatel slash AI dash voice dash Agent."*
 
 Hold the closing strip on screen for ~3 seconds with the URL visible.
 

@@ -424,30 +424,30 @@
       </div>
     </section>
 
-    <!-- ─── Slide 4: SIDE BOUNTIES + CLOSE ───────────────────── -->
+    <!-- ─── Slide 4: ENGINEERING RIGOR + CLOSE ───────────────── -->
     <section class="slide" data-dur="14">
       <div class="topbar">
         <div class="brand"><strong>Echo</strong><em>Claim</em></div>
-        <div class="pageno">04 / 04 · side bounties + the link</div>
+        <div class="pageno">04 / 04 · beyond the conversation</div>
       </div>
       <div class="body">
-        <h4>Side challenges, woven into the architecture</h4>
+        <h4>The rigor behind the voice</h4>
         <div class="bounty-grid">
           <div class="bounty">
-            <div class="b-title">Aikido · €1000</div>
-            <div class="b-line"><strong>12 PII patterns</strong> redacted before anything touches a log — policy, VIN, plate, IBAN, credit card, SVNR, Krankenversichertennr, driver licence, phone, email, DOB. Insurance is GDPR Article 9.</div>
+            <div class="b-title">Security &amp; privacy by default</div>
+            <div class="b-line"><strong>12 PII patterns</strong> redacted before anything touches a log — policy #, VIN, plate, IBAN, credit card, SVNR, Krankenversichertennr, driver licence, phone, email, DOB. Insurance handles GDPR Article 9 health data; we treated it that way from commit one.</div>
           </div>
           <div class="bounty">
-            <div class="b-title">Entire</div>
-            <div class="b-line">Server-mode dispatch wired in <code>scripts/setup_entire.sh</code>. Every architectural decision committed under <code>docs/entire-dispatches/</code>. README is partly written by Entire.</div>
+            <div class="b-title">Provenance, not just commits</div>
+            <div class="b-line">Every architectural decision is captured in a build journal alongside the diff — so the <em>why</em> of each change lives next to the <em>what</em>. Future maintainers don't have to guess.</div>
           </div>
           <div class="bounty">
-            <div class="b-title">Gradium · credits</div>
-            <div class="b-line"><strong>Three integration tiers</strong>: gradbot for laptop quickstart, GradiumClient for filler-audio batch, livekit-plugins-gradium for production phone. Emma voice + multiplexing demo.</div>
+            <div class="b-title">Voice quality, three tiers</div>
+            <div class="b-line">Laptop-mic prototype, direct-SDK filler-audio batcher, and a production telephony worker — all on the same voice (Emma family) with STT temperature pinned to suppress noise hallucination on highway / café audio.</div>
           </div>
           <div class="bounty">
-            <div class="b-title">Pioneer · Mac Mini</div>
-            <div class="b-line"><strong>fastino/gliner2-base-v1</strong> as the speed lane (47ms · free) versus Gemini-Lite structured output (300ms · $0.0015). Domain-aware. Full F1 benchmark in repo.</div>
+            <div class="b-title">Two extraction lanes</div>
+            <div class="b-line"><strong>47 ms · free</strong> on-device named-entity extraction for speed, versus structured-output LLM at <strong>300 ms · $0.0015</strong> for accuracy. Same domain config drives both. The trade-off is a feature, not a hack.</div>
           </div>
         </div>
         <div class="closing-strip">
