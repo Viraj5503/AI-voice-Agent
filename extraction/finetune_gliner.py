@@ -57,7 +57,14 @@ def load_jsonl(path: Path) -> list[dict]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data", default=str(REPO / "data" / "synthetic" / "fnol_train.jsonl"))
-    parser.add_argument("--model", default="knowledgator/gliner-bi-large-v2.0")
+    parser.add_argument(
+        "--model",
+        default="urchade/gliner_small-v2.1",
+        help="Base GLiNER to fine-tune.  Default is the 153M-param small "
+        "variant — runs ~3.5× faster than knowledgator/gliner-bi-large-v2.0 "
+        "(530M) at the cost of slightly lower zero-shot accuracy, which "
+        "the fine-tune more than makes up for.",
+    )
     parser.add_argument("--epochs", type=float, default=2.0)
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=5e-6)
