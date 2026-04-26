@@ -9,6 +9,11 @@ anthropic>=0.39.0             # juror bot only
 # free tier is throttled — see voice/livekit_agent.py:_build_llm.
 # Pin span 1.4–1.x — current PyPI is 1.5.6.
 livekit-agents[gradium,google,openai,silero]>=1.4,<2.0
+# Semantic end-of-turn detection — fixes the fragment-as-turn issue
+# where VAD silence alone fired on_user_turn_completed mid-sentence.
+# Tiny ML model (~50ms inference) reads chat context + transcript and
+# predicts whether the user is actually done speaking.
+livekit-plugins-turn-detector>=1.5,<2.0
 # Fast laptop-mic prototyping (Person A H0–H4 step). Real PyPI tops out
 # at 0.1.6; do NOT pin >=0.2.0 — that version doesn't exist:
 gradbot>=0.1.5

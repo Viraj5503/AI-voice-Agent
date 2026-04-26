@@ -65,6 +65,19 @@ except Exception as _voice_import_error:  # noqa: BLE001
     _VOICE_DEPS = False
     _voice_import_msg = str(_voice_import_error)
 
+# Semantic end-of-turn detection — separate import path so a missing
+# plugin can't break the whole file.  When present, we hand a model
+# instance to AgentSession(turn_detection=...) so the agent uses an ML
+# prediction of "is the user actually done speaking?" instead of
+# pure-VAD silence.  This is the canonical fix for the fragment-as-turn
+# segmentation issue.  See docs/turn-detector page on docs.livekit.io.
+try:
+    from livekit.plugins.turn_detector.multilingual import MultilingualModel
+    from livekit.plugins.turn_detector.english import EnglishModel
+    _TURN_DETECTOR_AVAILABLE = True
+except Exception:
+    _TURN_DETECTOR_AVAILABLE = False
+
 
 def load_crm(name: str) -> dict:
     return json.loads((REPO / "data" / "crm" / f"{name}.json").read_text(encoding="utf-8"))
@@ -190,17 +203,82 @@ def build_session(crm: dict, state: ClaimState):
     if pron_id:
         tts_kwargs["pronunciation_id"] = pron_id
 
-    # Gradium STT — temperature=0.0 stops Whisper-style noise hallucination
-    # ("Marama", "Englishman", "I live in Chicago" appearing from background
-    # ambient sound).  vad_threshold 0.9 / vad_bucket 2 are SDK defaults.
-    stt = lk_gradium.STT(temperature=0.0)
-
-    return AgentSession(
-        stt=stt,
-        llm=_build_llm(),
-        tts=lk_gradium.TTS(**tts_kwargs),
-        vad=lk_silero.VAD.load(),
+    # Gradium STT — three knobs working together to stop the
+    # fragment-as-turn problem live console runs surfaced:
+    #
+    # temperature=0.0 stops Whisper-style noise hallucination ("Marama",
+    # "I live in Chicago" appearing from background ambient sound).
+    #
+    # vad_threshold=0.85 (up from SDK default 0.6) requires MORE
+    # confident silence before Gradium emits a final transcript.  Mid-
+    # sentence breaths under that threshold get batched into the same
+    # transcript instead of fragmenting into 3-4 separate "turns".
+    #
+    # buffer_size_seconds=0.12 (up from default 0.08) widens the
+    # interim-transcript debounce window so micro-fragments collapse
+    # into one event before reaching the agent.
+    stt = lk_gradium.STT(
+        temperature=0.0,
+        vad_threshold=float(os.environ.get("GRADIUM_VAD_THRESHOLD", 0.85)),
+        buffer_size_seconds=float(os.environ.get("GRADIUM_BUFFER_S", 0.12)),
     )
+
+    # Semantic end-of-turn detection.  Runs a small ML model on every
+    # interim transcript to predict whether the user is actually done
+    # speaking — far more accurate than VAD silence alone, and it has
+    # near-zero latency overhead (~50ms inference).  Without it,
+    # livekit-agents falls back to VAD-mode endpointing, which fires
+    # on_user_turn_completed too early on natural mid-sentence pauses
+    # and triggers the "preemptive generation … chat context has
+    # changed" retry loop.
+    #
+    # TURN_DETECTOR=multilingual (default) covers German + English;
+    # TURN_DETECTOR=english is lighter for English-only deployments;
+    # TURN_DETECTOR=disabled falls back to pure-VAD detection.
+    turn_pref = (os.environ.get("TURN_DETECTOR") or "multilingual").lower()
+    turn_detection_arg = None
+    if _TURN_DETECTOR_AVAILABLE and turn_pref != "disabled":
+        try:
+            if turn_pref == "english":
+                turn_detection_arg = EnglishModel()
+            else:
+                turn_detection_arg = MultilingualModel()
+        except Exception as e:
+            print(f"  [turn-detector] init failed ({type(e).__name__}: {e}); "
+                  "falling back to VAD-only endpointing", file=sys.stderr)
+            turn_detection_arg = None
+    elif not _TURN_DETECTOR_AVAILABLE:
+        print("  [turn-detector] livekit-plugins-turn-detector not installed; "
+              "VAD-only endpointing in use", file=sys.stderr)
+
+    # Endpointing — uses the modern turn_handling API (min/max
+    # endpointing args were deprecated in v2.0 of livekit-agents).
+    # mode="dynamic" makes the agent observe actual pause patterns
+    # turn-to-turn and self-adjust the cutoff: zero latency cost on
+    # first turn, gets better as the call progresses.  With the
+    # turn_detector model active, these are mostly bumpers — semantic
+    # detection usually fires first.  When the model is uncertain or
+    # disabled, the dynamic timer takes over.  Widen min from the 0.5s
+    # default so natural breath pauses don't commit a partial turn.
+    turn_handling_arg = {
+        "endpointing": {
+            "mode": os.environ.get("ENDPOINT_MODE", "dynamic"),
+            "min_delay": float(os.environ.get("MIN_ENDPOINT_DELAY_S", 0.8)),
+            "max_delay": float(os.environ.get("MAX_ENDPOINT_DELAY_S", 4.0)),
+        },
+    }
+
+    session_kwargs: dict = {
+        "stt": stt,
+        "llm": _build_llm(),
+        "tts": lk_gradium.TTS(**tts_kwargs),
+        "vad": lk_silero.VAD.load(),
+        "turn_handling": turn_handling_arg,
+    }
+    if turn_detection_arg is not None:
+        session_kwargs["turn_detection"] = turn_detection_arg
+
+    return AgentSession(**session_kwargs)
 
 
 def _location_keywords(text: str) -> bool:
