@@ -17,21 +17,19 @@ from typing import Any
 # For multi-domain, pass `targets=` (and optionally fraud_labels) into
 # ClaimState; load via agent.domain.load_domain(...) to get them.
 PILLARS: list[tuple[str, str]] = [
-    ("injuries",              "anyone hurt — caller, passengers, third party"),
-    ("accident_datetime",     "when (date + time)"),
-    ("accident_location",     "where (address / road name)"),
-    ("road_type",             "Autobahn / city street / parking lot / other"),
-    ("how_it_happened",       "free-form description of the incident"),
-    ("vehicle_drivable",      "is the car drivable + current location"),
-    ("other_party_involved",  "was anyone else involved"),
-    ("other_party_plate",     "other vehicle license plate"),
-    ("other_party_insurer",   "other party's insurer"),
-    ("police_involved",       "was police called"),
-    ("police_case_number",    "police case / reference number"),
-    ("witnesses",             "independent witnesses (name + contact)"),
-    ("driver_identity",       "who was driving (if not policyholder)"),
-    ("fault_admission",       "anything said about fault at the scene"),
-    ("settlement_preference", "preferred repair shop / need a rental"),
+    ("claim_type",            "is this an auto, health, or medical claim?"),
+    ("incident_datetime",     "when did the incident or medical event occur (date + time)"),
+    ("incident_location",     "where (address, hospital, clinic, or road name)"),
+    ("injuries_or_symptoms",  "description of injuries or health symptoms"),
+    ("how_it_happened",       "free-form description of the incident or medical issue"),
+    ("treatment_received",    "what medical treatment was received (if health claim)"),
+    ("provider_name",         "name of doctor or hospital (if health claim)"),
+    ("vehicle_drivable",      "is the car drivable (if auto claim)"),
+    ("other_party_involved",  "was anyone else involved (other driver, doctor, etc.)"),
+    ("police_or_ambulance",   "was police or ambulance called?"),
+    ("witnesses",             "independent witnesses (if auto claim)"),
+    ("fault_admission",       "anything said about fault at the scene (if auto claim)"),
+    ("settlement_preference", "preferred repair shop or reimbursement method"),
 ]
 
 FRAUD_LABELS: list[str] = [

@@ -50,26 +50,26 @@ def _phase(state: ClaimState) -> str:
     filled = len(state.pillars)
     if filled == 0:
         return "greeting"
-    if "injuries" not in state.pillars:
-        return "safety"
-    if filled < 8:
+    if "injuries_or_symptoms" not in state.pillars and "claim_type" not in state.pillars:
+        return "safety_or_triage"
+    if filled < 7:
         return "detail"
     return "wrap_up"
 
 
 _PHASE_ADVICE = {
     "greeting": (
-        "You've just answered.  Your goal in the next ~30 seconds: confirm "
-        "the caller is physically safe (injuries pillar)."
+        "You've just answered.  Your goal in the next ~30 seconds: figure out "
+        "if they are calling about an auto accident or a medical/health issue."
     ),
-    "safety": (
-        "Make sure injuries are addressed.  Then start gathering accident "
-        "circumstances — but only one or two questions per turn."
+    "safety_or_triage": (
+        "Make sure any immediate physical injuries or severe health symptoms are addressed.  "
+        "Then start gathering circumstances — but only one or two questions per turn."
     ),
     "detail": (
         "You're mid-call.  Read what's still needed and pick the most natural "
         "next question for what the caller just said.  Do NOT cycle through "
-        "questions you've already asked."
+        "questions you've already asked. Adapt your questions based on whether it is an auto or health claim."
     ),
     "wrap_up": (
         "Most pillars are filled.  Move toward closing: confirm preferred "
@@ -171,9 +171,10 @@ def build_jamie_system_prompt(
         )
     else:
         domain_block = (
-            "\n# DOMAIN: Vorsicht Versicherung — First Notice of Loss\n"
-            "Role: Claims Intake Specialist (default — pass a DomainConfig "
+            "\n# DOMAIN: Vorsicht Versicherung — Claims Intake\n"
+            "Role: Auto and Health Claims Intake Specialist (default — pass a DomainConfig "
             "to override).\n"
+            "You are authorized and fully capable of handling BOTH car accident claims AND medical/health insurance claims. DO NOT transfer the user to another department for health claims."
         )
     last_block = (
         f'\n# WHAT YOU JUST SAID (do NOT ask the same thing again, do NOT echo this verbatim):\n'
@@ -234,6 +235,5 @@ def opening_line(crm: dict[str, Any], domain: "Any | None" = None) -> str:
     short = name.split()[0] if isinstance(name, str) else "there"
     return (
         f"Guten Tag {short}, you're through to Jamie at Vorsicht claims — "
-        f"I have your file open.  First things first: are you okay?  "
-        f"Anyone hurt?"
+        f"I have your file open. How can I help you today? Is everyone okay?"
     )
