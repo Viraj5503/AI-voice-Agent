@@ -90,8 +90,7 @@ def _f1(pred: dict, gold: dict) -> float:
     return 2 * p * r / (p + r) if (p + r) else 0.0
 
 
-def bench_gliner() -> dict:
-    svc = ExtractionService()
+def _bench_gliner_with(svc: ExtractionService, label: str) -> dict:
     f1s, latencies = [], []
     for ex in EVAL_DATA:
         t0 = time.perf_counter()
@@ -100,11 +99,38 @@ def bench_gliner() -> dict:
         merged = {**out["pillars"], **out["fraud"]}
         f1s.append(_f1({k: v["text"] for k, v in merged.items()}, ex["gold"]))
     return {
-        "name": f"GLiNER ({svc.mode}: {svc.model_name or 'regex-stub'})",
+        "name": label,
         "latency_ms": round(mean(latencies), 1),
         "cost_per_call_usd": 0.0,
         "f1": round(mean(f1s), 3),
     }
+
+
+def bench_gliner() -> dict:
+    """Benchmark the default GLiNER (zero-shot from public models)."""
+    svc = ExtractionService()
+    return _bench_gliner_with(
+        svc, f"GLiNER zero-shot ({svc.mode}: {svc.model_name or 'regex-stub'})"
+    )
+
+
+def bench_gliner_finetuned() -> dict | None:
+    """Benchmark the fine-tuned model produced by extraction/finetune_gliner.py.
+
+    Returns None if no fine-tuned model has been trained yet — keeps the
+    benchmark useful before the Pioneer fine-tune step has been run."""
+    repo_root = Path(__file__).resolve().parent.parent
+    candidates = [
+        repo_root / "models" / "jamie-gliner-v1",
+        repo_root / "models" / "jamie-gliner",  # legacy name
+    ]
+    for path in candidates:
+        if path.exists() and (path / "config.json").exists():
+            svc = ExtractionService(model_name=str(path))
+            return _bench_gliner_with(
+                svc, f"GLiNER fine-tuned (jamie-fnol → {path.name})"
+            )
+    return None
 
 
 def bench_gemini() -> dict | None:
@@ -171,6 +197,9 @@ def bench_gemini() -> dict | None:
 
 def main() -> None:
     rows = [bench_gliner()]
+    ft = bench_gliner_finetuned()
+    if ft:
+        rows.append(ft)
     g = bench_gemini()
     if g:
         rows.append(g)
