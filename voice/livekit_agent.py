@@ -75,34 +75,31 @@ def _on_ollama() -> bool:
     return (os.environ.get("BRAIN_PROVIDER") or "ollama").lower() == "ollama"
 
 
-def _build_llm():
-    """Pick the LLM based on BRAIN_PROVIDER, mirroring agent.brain.make_brain.
+def _build_primary_llm():
+    """Build the PRIMARY LLM based on BRAIN_PROVIDER.
 
-    BRAIN_PROVIDER=ollama  →  livekit-plugins-openai pointed at local Ollama
-                              (no quota, ~1-2s per turn on M-series).
     BRAIN_PROVIDER=gemini  →  livekit-plugins-google native Gemini.
+    BRAIN_PROVIDER=ollama  →  livekit-plugins-openai pointed at LLM_BASE_URL
+                              (defaults to local Ollama, but supports any
+                              OpenAI-compatible /v1 endpoint via LLM_*).
     default                →  ollama (free-tier quota survival).
 
-    The Gradium STT/TTS path is unaffected — only the LLM hop changes.
+    Useful LLM_BASE_URL escape hatches when the laptop is overloaded or
+    local quality is too low:
+      - Groq Cloud      base=https://api.groq.com/openai
+                        model=llama-3.3-70b-versatile (free 100k TPD)
+      - Cerebras Cloud  base=https://api.cerebras.ai
+                        model=llama-3.3-70b  (free tier, sub-200ms)
+      - OpenAI direct   base=https://api.openai.com
+                        model=gpt-4o-mini
+    Timeout 30s tolerates Ollama's ~10s first-call warmup; harmless on
+    hosted providers since they respond in <1s.
     """
     if not _on_ollama():
         return lk_google.LLM(
             model=os.environ.get("GEMINI_MODEL", "gemini-flash-latest"),
             temperature=0.85,
         )
-
-    # OpenAI-compatible LLM hop.  Defaults to local Ollama, but swap-in
-    # for any hosted provider that speaks the OpenAI /v1 protocol by
-    # setting LLM_BASE_URL + LLM_API_KEY + LLM_MODEL.  Useful escape
-    # hatches when the laptop is overloaded or local quality is too low:
-    #   - Groq Cloud      base=https://api.groq.com/openai
-    #                     model=llama-3.3-70b-versatile  (free 14k req/day)
-    #   - Cerebras Cloud  base=https://api.cerebras.ai
-    #                     model=llama-3.3-70b  (free tier, sub-200ms)
-    #   - OpenAI direct   base=https://api.openai.com
-    #                     model=gpt-4o-mini
-    # Timeout 30s tolerates Ollama's ~10s first-call warmup; harmless on
-    # hosted providers since they respond in <1s.
     base_url_root = os.environ.get(
         "LLM_BASE_URL",
         os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434"),
@@ -116,6 +113,51 @@ def _build_llm():
         temperature=0.85,
         timeout=30.0,
     )
+
+
+def _build_fallback_llm():
+    """Build a SECONDARY LLM from LLM_FALLBACK_* env vars, or None.
+
+    The fallback is always OpenAI-compatible (works for Groq, Cerebras,
+    OpenAI, even another Ollama instance).  None of the providers in this
+    industry can be trusted on demo day — Gemini hits per-minute quota,
+    Groq hits per-day token caps, Anthropic runs out of credit, local
+    Ollama can OOM the laptop.  Wrapping primary + fallback in
+    livekit.agents.llm.FallbackAdapter means a single 429 / 5xx / timeout
+    on the primary cleanly reroutes mid-call without dropping the user.
+    """
+    base = os.environ.get("LLM_FALLBACK_BASE_URL")
+    if not base:
+        return None
+    return lk_openai.LLM(
+        model=os.environ.get("LLM_FALLBACK_MODEL", "llama-3.1-8b-instant"),
+        api_key=os.environ.get("LLM_FALLBACK_API_KEY", ""),
+        base_url=base.rstrip("/") + "/v1",
+        temperature=0.85,
+        timeout=30.0,
+    )
+
+
+def _build_llm():
+    """Return either the primary LLM or a FallbackAdapter([primary, fallback]).
+
+    Logged on construction so you can see at boot which path is active.
+    """
+    primary = _build_primary_llm()
+    fallback = _build_fallback_llm()
+    if fallback is None:
+        print(
+            f"  [llm] using {type(primary).__name__} (no fallback configured)",
+            file=sys.stderr,
+        )
+        return primary
+    from livekit.agents.llm import FallbackAdapter
+    print(
+        f"  [llm] primary={type(primary).__name__}  "
+        f"fallback={type(fallback).__name__}@{os.environ.get('LLM_FALLBACK_BASE_URL')}",
+        file=sys.stderr,
+    )
+    return FallbackAdapter([primary, fallback])
 
 
 def build_session(crm: dict, state: ClaimState):
