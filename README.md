@@ -85,3 +85,28 @@ See `telephony/README.md`. Provision a LiveKit room, point Twilio SIP at it, run
 | H21–H24 | Both | Pitch rehearsal, final `entire enable` summary in README |
 
 See `OPERATION_TURING_ADJUSTER_v2.md` for the full game plan.
+
+## Build journal
+
+Reasoning traces captured by [Entire](docs/ENTIRE.md) — every meaningful
+agent-driven decision in this repo, with the *why* alongside the
+*what*.  The submission story for the Entire bounty is exactly this
+section: clone the repo, read the journal, see how the build actually
+unfolded.
+
+| Date | Dispatch | Phase summary |
+|---|---|---|
+| 2026-04-26 | [docs/entire-dispatches/2026-04-26.md](docs/entire-dispatches/2026-04-26.md) | Full hackathon decision narrative — STT segmentation fix, Pioneer fine-tune, Gradium pronunciation dict (incl. undocumented API discovery), Aikido scan + PII expansion, Tavily 5-surface grounding, architecture pivot to custom GeminiBrain, demo-day resilience layers |
+
+To capture a fresh dispatch covering everything since the last entry:
+
+```bash
+bash scripts/setup_entire.sh        # one-shot — installs, enables, dispatches
+# or, after subsequent commits:
+entire dispatch --since 24h > docs/entire-dispatches/$(date +%Y-%m-%d).md
+git add docs/entire-dispatches/ && git commit -m "entire: dispatch $(date +%Y-%m-%d)"
+```
+
+The pitch line: *"Our build process itself is AI-documented.  Every
+architectural decision our agents made is captured by Entire here —
+version-controlled why alongside the what."*

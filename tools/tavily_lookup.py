@@ -36,7 +36,16 @@ def _client() -> Any | None:
 # ---- canonical functions Jamie's tool-calling LLM can invoke -------------
 
 def lookup_weather(location: str) -> dict[str, Any]:
-    """Return current weather + road conditions for a location."""
+    """Return current weather + road conditions for a location.
+
+    Uses topic="news" + time_range="day" + country="germany" so the result is
+    fresh, relevant German weather/traffic coverage instead of generic
+    knowledge-graph hits.  include_answer="advanced" asks Tavily to
+    synthesise a one-paragraph summary across the top results — Jamie
+    can quote that summary verbatim ("I see there were heavy rains in
+    your area this morning") which is the single highest-impact Turing-
+    test moment per the OPERATION doc.
+    """
     c = _client()
     if c is None:
         return {
@@ -49,8 +58,12 @@ def lookup_weather(location: str) -> dict[str, Any]:
         }
     try:
         res = c.search(
-            query=f"current weather and road conditions {location} today",
+            query=f"weather road conditions {location} today",
+            topic="news",
+            time_range="day",
+            country="germany",
             max_results=3,
+            include_answer="advanced",
             search_depth="basic",
         )
     except Exception as e:
@@ -59,6 +72,40 @@ def lookup_weather(location: str) -> dict[str, Any]:
     return {
         "stub": False,
         "summary": summary,
+        "source_urls": [r["url"] for r in res.get("results", [])[:3]],
+    }
+
+
+def lookup_traffic(location: str) -> dict[str, Any]:
+    """Live traffic incidents / road closures at the location.
+
+    Different signal than weather: "There's a closure on the A4 near
+    Köln today" is a highly believable, specific moment that no
+    canned-script bot would offer.  Uses news + day window so we never
+    quote stale incident reports.
+    """
+    c = _client()
+    if c is None:
+        return {
+            "stub": True,
+            "summary": f"No live traffic data — stub mode for {location}",
+            "source_urls": [],
+        }
+    try:
+        res = c.search(
+            query=f"traffic accident road closure {location} today",
+            topic="news",
+            time_range="day",
+            country="germany",
+            max_results=3,
+            include_answer="advanced",
+            search_depth="basic",
+        )
+    except Exception as e:
+        return {"error": str(e), "summary": None, "source_urls": []}
+    return {
+        "stub": False,
+        "summary": res.get("answer") or (res["results"][0]["content"] if res.get("results") else None),
         "source_urls": [r["url"] for r in res.get("results", [])[:3]],
     }
 
@@ -75,24 +122,31 @@ def lookup_towing(location: str) -> dict[str, Any]:
     try:
         res = c.search(
             query=f"24 hour Abschleppdienst near {location}",
+            country="germany",
             max_results=3,
+            include_answer="advanced",
         )
     except Exception as e:
         return {"error": str(e), "summary": None, "source_urls": []}
     return {
         "stub": False,
-        "summary": (res.get("results") or [{}])[0].get("content"),
+        "summary": res.get("answer") or (res.get("results") or [{}])[0].get("content"),
         "source_urls": [r["url"] for r in res.get("results", [])[:3]],
     }
 
 
 def lookup_address(query: str) -> dict[str, Any]:
-    """Loose address sanity-check via Tavily."""
+    """Loose address sanity-check via Tavily.  Used to confirm a German
+    address parses to a real location before quoting it in claim docs."""
     c = _client()
     if c is None:
         return {"stub": True, "summary": query, "source_urls": []}
     try:
-        res = c.search(query=f"{query} address verification Germany", max_results=2)
+        res = c.search(
+            query=f"{query} address verification Germany",
+            country="germany",
+            max_results=2,
+        )
     except Exception as e:
         return {"error": str(e), "summary": None, "source_urls": []}
     return {
@@ -100,6 +154,27 @@ def lookup_address(query: str) -> dict[str, Any]:
         "summary": (res.get("results") or [{}])[0].get("content"),
         "source_urls": [r["url"] for r in res.get("results", [])[:2]],
     }
+
+
+def lookup_qa(question: str) -> dict[str, Any]:
+    """Direct fact-check using Tavily's qna_search.  Returns one
+    synthesised answer string instead of a list of search results.
+    Useful for "Is HUK-Coburg one of Germany's largest motor insurers?"
+    style questions where Jamie wants to verify a claim before
+    affirming it."""
+    c = _client()
+    if c is None:
+        return {"stub": True, "answer": "(no Tavily key)"}
+    try:
+        ans = c.qna_search(
+            query=question,
+            topic="general",
+            days=7,
+            max_results=4,
+        )
+        return {"stub": False, "answer": ans}
+    except Exception as e:
+        return {"error": str(e), "answer": None}
 
 
 # ---- Gemini-style function-declaration objects ---------------------------
@@ -136,12 +211,41 @@ GEMINI_TOOL_DECLS = [
             "required": ["query"],
         },
     },
+    {
+        "name": "tavily_lookup_traffic",
+        "description": (
+            "Look up live traffic incidents and road closures at an "
+            "accident location.  Use after the caller names an Autobahn "
+            "or major road — gives Jamie a believable specific fact like "
+            "'I see there's a closure on the A4 near you today.'"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"location": {"type": "string"}},
+            "required": ["location"],
+        },
+    },
+    {
+        "name": "tavily_lookup_qa",
+        "description": (
+            "Direct one-line fact-check.  Use when the caller states "
+            "something Jamie wants to verify before affirming, e.g. "
+            "'Is HUK-Coburg the largest German motor insurer?'"
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {"question": {"type": "string"}},
+            "required": ["question"],
+        },
+    },
 ]
 
 DISPATCH = {
     "tavily_lookup_weather": lookup_weather,
     "tavily_lookup_towing": lookup_towing,
     "tavily_lookup_address": lookup_address,
+    "tavily_lookup_traffic": lookup_traffic,
+    "tavily_lookup_qa": lookup_qa,
 }
 
 

@@ -44,6 +44,7 @@ _FALLBACK_MODELS = [
     "gemini-flash-latest",
     "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
+    "gemini-1.5-flash",
     "gemini-pro-latest",
     "gemini-2.5-pro",
 ]

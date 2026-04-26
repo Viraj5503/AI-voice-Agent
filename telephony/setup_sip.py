@@ -20,6 +20,11 @@ After `setup`:
 
 We tag the trunk + rule with name="jamie-inbound" so re-runs are idempotent
 and `teardown` knows what's safe to delete.
+
+Optional:
+    Set LIVEKIT_SIP_URI in .env (e.g. sip:uloklnbmk2j.sip.livekit.cloud)
+    to use an explicit SIP endpoint provided by Inca. If unset, we derive
+    sip:<project>.sip.livekit.cloud from LIVEKIT_URL.
 """
 
 from __future__ import annotations
@@ -68,6 +73,24 @@ def _twilio_number() -> str | None:
     return n.strip() if n else None
 
 
+def _livekit_sip_uri() -> str:
+    """Resolve the SIP URI Twilio should dial.
+
+    Priority:
+      1) LIVEKIT_SIP_URI (explicit override from Inca)
+      2) Derived from LIVEKIT_URL as sip:<project>.sip.livekit.cloud
+    """
+    override = (os.environ.get("LIVEKIT_SIP_URI") or "").strip()
+    if override:
+        return override
+
+    lk_url = os.environ.get("LIVEKIT_URL", "")
+    project = lk_url.replace("wss://", "").replace("ws://", "").rstrip("/").split(".")[0]
+    if not project:
+        raise SystemExit("LIVEKIT_URL not set (or invalid) and LIVEKIT_SIP_URI not provided")
+    return f"sip:{project}.sip.livekit.cloud"
+
+
 # --------------------------------------------------------------------------
 async def cmd_list() -> int:
     lk = _client()
@@ -78,8 +101,7 @@ async def cmd_list() -> int:
         await lk.aclose()
 
     lk_url = os.environ.get("LIVEKIT_URL", "")
-    project = lk_url.replace("wss://", "").replace("ws://", "").rstrip("/").split(".")[0]
-    sip_uri = f"sip:{project}.sip.livekit.cloud" if project else "(unknown)"
+    sip_uri = _livekit_sip_uri()
 
     print(f"\nLiveKit URL:  {lk_url}")
     print(f"SIP URI:      {sip_uri}    ← give this to Twilio")
@@ -157,14 +179,7 @@ async def cmd_setup() -> int:
             rule = await lk.sip.create_dispatch_rule(req_rule)
             print(f"  ✓ dispatch rule created: {rule.sip_dispatch_rule_id}")
 
-        # Derive the SIP URI from the project URL.  LiveKit Cloud projects
-        # accept inbound SIP at `<project>.sip.livekit.cloud`.  We extract
-        # the project hostname from the wss URL.
-        lk_url = os.environ.get("LIVEKIT_URL", "")
-        # wss://<project>.<region>.livekit.cloud  →  <project>.sip.livekit.cloud
-        host = lk_url.replace("wss://", "").replace("ws://", "").rstrip("/")
-        project = host.split(".")[0]
-        sip_uri = f"sip:{project}.sip.livekit.cloud"
+        sip_uri = _livekit_sip_uri()
 
         phone = _twilio_number() or "(your Twilio #)"
         print()

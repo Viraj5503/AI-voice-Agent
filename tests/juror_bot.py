@@ -183,9 +183,9 @@ async def simulate_call(
     max_turns: int = 8,
 ) -> CallResult:
     state = ClaimState(call_id=f"juror-{persona['name']}")
-    # make_brain() respects BRAIN_PROVIDER, so the harness survives a Gemini
-    # quota lockout by falling through to local Ollama.
-    brain = make_brain()
+    # Keep the tested agent behavior Gemini-consistent during juror runs.
+    # If Gemini is unavailable, brain.make_brain() returns the Gemini stub.
+    brain = make_brain(prefer="gemini")
     transcript: list[dict] = []
 
     # Jamie speaks first

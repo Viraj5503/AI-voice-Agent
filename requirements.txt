@@ -9,6 +9,11 @@ anthropic>=0.39.0             # juror bot only
 # free tier is throttled — see voice/livekit_agent.py:_build_llm.
 # Pin span 1.4–1.x — current PyPI is 1.5.6.
 livekit-agents[gradium,google,openai,silero]>=1.4,<2.0
+# Semantic end-of-turn detection — fixes the fragment-as-turn issue
+# where VAD silence alone fired on_user_turn_completed mid-sentence.
+# Tiny ML model (~50ms inference) reads chat context + transcript and
+# predicts whether the user is actually done speaking.
+livekit-plugins-turn-detector>=1.5,<2.0
 # Fast laptop-mic prototyping (Person A H0–H4 step). Real PyPI tops out
 # at 0.1.6; do NOT pin >=0.2.0 — that version doesn't exist:
 gradbot>=0.1.5
@@ -21,9 +26,12 @@ tavily-python>=0.5.0
 # --- Extraction (Pioneer / Fastino bounty) ---
 # current PyPI: gliner 0.2.26
 gliner>=0.2.13
-transformers>=4.45.0
-torch>=2.4.0
+transformers==4.53.0
+torch==2.8.0
 huggingface-hub>=0.25.0
+# accelerate is required by transformers.Trainer for both CPU + MPS/CUDA
+# fine-tunes — extraction/finetune_gliner.py won't start without it.
+accelerate>=1.1.0
 
 # Note on Python version: livekit-agents requires Python <3.15.  If you're
 # on Python 3.14, everything in this file installs cleanly.  On 3.13 or 3.12
@@ -35,8 +43,10 @@ uvicorn[standard]>=0.30.0
 websockets>=13.0
 
 # --- Utility ---
-python-dotenv>=1.0.1
+python-dotenv==1.2.2
 pydantic>=2.9.0
 rich>=13.8.0                  # pretty CLI for demo runner
 httpx>=0.27.0
-orjson>=3.10.0
+orjson==3.11.6
+
+pillow==12.2.0

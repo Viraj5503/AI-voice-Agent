@@ -6,16 +6,16 @@ The whole demo only works once an inbound phone number is wired into a LiveKit r
 
 Inca usually hands out **scoped API-Key credentials** (more secure than master Auth Token). Map them like this:
 
-| What Inca gave you   | Where it goes in `.env`     |
-|----------------------|------------------------------|
-| `AccountSID`         | `TWILIO_ACCOUNT_SID`         |
-| `APIKeySID`          | `TWILIO_API_KEY_SID`         |
-| `APIKeySecret`       | `TWILIO_API_KEY_SECRET`      |
-| phone number         | `TWILIO_PHONE_NUMBER`        |
+| What Inca gave you | Where it goes in `.env` |
+| ------------------ | ----------------------- |
+| `AccountSID`       | `TWILIO_ACCOUNT_SID`    |
+| `APIKeySID`        | `TWILIO_API_KEY_SID`    |
+| `APIKeySecret`     | `TWILIO_API_KEY_SECRET` |
+| phone number       | `TWILIO_PHONE_NUMBER`   |
 
 Leave `TWILIO_AUTH_TOKEN` empty — `telephony/twilio_client.py` auto-detects API-Key mode when `TWILIO_API_KEY_SID` is set.
 
-If instead you have your *own* Twilio account with master creds, fill `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` and leave the API-Key fields empty.
+If instead you have your _own_ Twilio account with master creds, fill `TWILIO_ACCOUNT_SID` + `TWILIO_AUTH_TOKEN` and leave the API-Key fields empty.
 
 ### Verify the credentials work
 
@@ -43,6 +43,8 @@ Two paths — pick whichever Inca's setup matches.
 Ask in the hackathon Slack for the LiveKit SIP dispatch URI. Then:
 
 1. `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET` in `.env`.
+   If Inca gives an explicit SIP endpoint (for example,
+   `sip:uloklnbmk2j.sip.livekit.cloud`), set `LIVEKIT_SIP_URI` too.
 2. Configure the SIP trunk in the LiveKit dashboard with the URI Inca gave you.
 3. `python voice/livekit_agent.py` in one terminal.
 4. Place the inbound test call.
@@ -57,12 +59,12 @@ Ask in the hackathon Slack for the LiveKit SIP dispatch URI. Then:
 
 ## Latency budget (target <740ms total)
 
-| Step                             | Budget |
-|----------------------------------|--------|
-| STT (Gradium / Whisper)          | <120ms |
-| Gemini 2.5 Flash first-token     | <220ms |
-| Gradium TTS first-audio (TTFT)   | <300ms |
-| Network + jitter                 | <100ms |
+| Step                           | Budget |
+| ------------------------------ | ------ |
+| STT (Gradium / Whisper)        | <120ms |
+| Gemini 2.5 Flash first-token   | <220ms |
+| Gradium TTS first-audio (TTFT) | <300ms |
+| Network + jitter               | <100ms |
 
 We close any remaining gap with **filler audio** (`fillers/manifest.json`): the moment a tool call is dispatched, we play "Let me just pull up the map…" so perceived latency drops below the 500ms uncanny-valley threshold.
 

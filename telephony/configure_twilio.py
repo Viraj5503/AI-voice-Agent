@@ -44,12 +44,16 @@ SAVE_PATH = REPO / "telephony" / ".twilio_voice_url_backup.txt"
 
 
 def _livekit_sip_uri() -> str:
-    """Derive sip:<project>.sip.livekit.cloud from LIVEKIT_URL."""
+    """Resolve SIP URI from LIVEKIT_SIP_URI or derive from LIVEKIT_URL."""
+    override = (os.environ.get("LIVEKIT_SIP_URI") or "").strip()
+    if override:
+        return override
+
     lk_url = os.environ.get("LIVEKIT_URL", "")
     host = lk_url.replace("wss://", "").replace("ws://", "").rstrip("/")
     project = host.split(".")[0]
     if not project:
-        raise SystemExit("LIVEKIT_URL not set in .env")
+        raise SystemExit("LIVEKIT_URL not set in .env and LIVEKIT_SIP_URI not provided")
     return f"sip:{project}.sip.livekit.cloud"
 
 

@@ -1,8 +1,13 @@
 """Provider-pluggable conversational brain.
 
-Why: Google's free tier had a multi-hour 429 storm during the hackathon
-(other teams confirmed on Discord).  Pinning to a single provider is a
-demo-day failure waiting to happen.  This module lets the brain be:
+Default behavior is now GEMINI-FIRST and GEMINI-LOCKED for consistency.
+If Gemini is unavailable, we stay on the Gemini stub unless you explicitly
+opt in to cross-provider fallback with:
+
+    BRAIN_ALLOW_NON_GEMINI_FALLBACK=1
+
+This avoids accidental drift between model families (Gemini vs llama/gpt)
+during tuning and evaluation.  Providers available:
 
     BRAIN_PROVIDER=gemini    (default — agent.gemini_client.GeminiBrain)
     BRAIN_PROVIDER=ollama    (local llama3 / qwen, no quota)
@@ -13,10 +18,7 @@ All brains expose the same async interface:
     async for chunk in brain.stream_reply(system_prompt, history, user_msg):
         ...
 
-`make_brain()` reads BRAIN_PROVIDER and returns the right one.  If the
-configured provider isn't available (key missing / package not installed)
-we log loudly and fall back to the next available option, so the demo
-never silently degrades.
+`make_brain()` reads BRAIN_PROVIDER and returns the right one.
 """
 
 from __future__ import annotations
@@ -89,14 +91,43 @@ _FACTORIES = {
 }
 
 
+def _is_truthy(value: str | None) -> bool:
+    return (value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _allow_non_gemini_fallback() -> bool:
+    return _is_truthy(os.environ.get("BRAIN_ALLOW_NON_GEMINI_FALLBACK"))
+
+
 def make_brain(prefer: str | None = None) -> Brain:
-    """Return a usable brain.  Tries the preferred provider first, then
-    falls back through the others until one yields a real (non-stub)
-    brain.  Worst case returns the Gemini stub so code paths still run."""
-    order = [prefer or os.environ.get("BRAIN_PROVIDER", "gemini")]
+    """Return a usable brain.
+
+    Behavior:
+      1) Try preferred provider first.
+      2) If preferred is Gemini and fallback is NOT explicitly enabled,
+         stay on Gemini (live or stub) and do not silently switch provider.
+      3) If fallback is enabled, try remaining providers.
+      4) Worst case, return Gemini stub so local flows still run.
+    """
+    preferred = prefer or os.environ.get("BRAIN_PROVIDER", "gemini")
+    order = [preferred]
     for k in ("gemini", "ollama", "openai"):
         if k not in order:
             order.append(k)
+
+    # Strict-by-default Gemini path: no cross-provider drift unless opt-in.
+    if preferred == "gemini" and not _allow_non_gemini_fallback():
+        g = _try_gemini()
+        if g is not None:
+            if getattr(g, "_real", False):
+                print(f"  [brain] using gemini: {g.model_name}", file=sys.stderr)
+            else:
+                print(
+                    "  [brain] gemini key/model unavailable — using gemini stub "
+                    "(set BRAIN_ALLOW_NON_GEMINI_FALLBACK=1 to allow ollama/openai)",
+                    file=sys.stderr,
+                )
+            return g
 
     for prov in order:
         if prov not in _FACTORIES:
