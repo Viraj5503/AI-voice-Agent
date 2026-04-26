@@ -404,6 +404,48 @@ async def entrypoint(ctx) -> None:  # type: ignore[no-untyped-def]
 
     session.on("conversation_item_added", _on_item_added)
 
+    # Filler-audio injection on listening → thinking transition.
+    # Why: even with Gemini Flash @ 600ms, there's a perceptible silence
+    # gap right after the caller stops speaking and before Jamie's actual
+    # response starts streaming.  Real human agents fill that gap with
+    # "mm-hmm", "right", "okay so".  Robots leave it silent.  We inject
+    # a randomly-chosen short empathy token via session.say() the moment
+    # the agent transitions to "thinking" — this TTSes through Gradium
+    # in ~150-200ms (well under the LLM's first-token latency) and the
+    # actual reply queues seamlessly behind it.
+    #
+    # Probability gate (FILLER_RATE) so it doesn't fire on every turn —
+    # a real human says "mm-hmm" maybe 50-70% of the time, not 100%.
+    # Set FILLER_RATE=0 to disable; FILLER_RATE=1 to always-on.
+    import random
+    _EMPATHY_FILLERS = [
+        "Mm-hmm.",
+        "Right.",
+        "Okay.",
+        "Got it.",
+        "Mm.",
+        "Right, okay.",
+        "Yeah.",
+    ]
+    filler_rate = float(os.environ.get("FILLER_RATE", "0.6"))
+
+    def _on_state_change(ev) -> None:  # type: ignore[no-untyped-def]
+        if getattr(ev, "old_state", None) != "listening":
+            return
+        if getattr(ev, "new_state", None) != "thinking":
+            return
+        if random.random() > filler_rate:
+            return
+        filler = random.choice(_EMPATHY_FILLERS)
+        # allow_interruptions=True so the actual LLM response can talk
+        # over the tail of the filler if it arrives faster than expected.
+        try:
+            asyncio.create_task(session.say(filler, allow_interruptions=True))
+        except Exception:
+            pass  # never crash a call over a filler
+
+    session.on("agent_state_changed", _on_state_change)
+
     await session.start(agent=agent, room=ctx.room)
 
 
