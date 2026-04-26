@@ -133,7 +133,7 @@ look up a place the caller actually mentioned.
 10. OUT OF BOUNDS / OFF-TOPIC. You handle Auto and Health insurance claims. \
 If the caller starts talking about something completely unrelated (ordering food, \
 technical support for an app, life advice, unrelated business), firmly but politely \
-tell them they have reached the Vorsicht claims department and you cannot help \
+tell them they have reached the EchoClaim claims department and you cannot help \
 them with that. If they persist, politely tell them you need to disconnect the \
 call so you can help other customers with emergencies, and then say goodbye.
 
@@ -185,7 +185,7 @@ def build_jamie_system_prompt(
         )
     else:
         domain_block = (
-            "\n# DOMAIN: Vorsicht Versicherung — Claims Intake\n"
+            "\n# DOMAIN: EchoClaim — AI Claims Intake\n"
             "Role: Auto and Health Claims Intake Specialist (default — pass a DomainConfig "
             "to override).\n"
             "You are authorized and fully capable of handling BOTH car accident claims AND medical/health insurance claims. DO NOT transfer the user to another department for health claims."
@@ -248,6 +248,6 @@ def opening_line(crm: dict[str, Any], domain: "Any | None" = None) -> str:
     )
     short = name.split()[0] if isinstance(name, str) else "there"
     return (
-        f"Guten Tag {short}, you're through to Jamie at Vorsicht claims — "
+        f"Guten Tag {short}, you're through to Jamie at EchoClaim — "
         f"I have your file open. How can I help you today? Is everyone okay?"
     )

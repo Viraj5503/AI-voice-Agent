@@ -15,7 +15,7 @@ function Bubble({ entry }) {
         }
       </div>
       <div className={styles.content}>
-        <div className={styles.speaker}>{isJamie ? 'Jamie' : 'Caller'}</div>
+        <div className={styles.speaker}>{isJamie ? 'EchoClaim' : 'Caller'}</div>
         <div className={styles.text}>{entry.text}</div>
         {entry.ts && (
           <div className={styles.ts}>
