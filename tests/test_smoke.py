@@ -30,6 +30,50 @@ def test_pii_redact():
     assert "[VIN]" in out
 
 
+def test_pii_redact_extended():
+    """Aikido-bounty patterns: credit card, social security, health card,
+    multi-segment phone, IBAN, DOB, email — none of these should leak even
+    when they appear in a single transcript line."""
+    from agent.pii_redact import redact
+
+    # Credit card with separators
+    out = redact("My card 4242 4242 4242 4242.")
+    assert "4242" not in out, f"credit card leaked: {out!r}"
+    assert "[CARD]" in out
+
+    # Credit card without separators
+    out = redact("Card no 4111111111111111 expires.")
+    assert "4111111111111111" not in out
+    assert "[CARD]" in out
+
+    # IBAN
+    out = redact("DE89 3704 0044 0532 0130 00 is mine.")
+    assert "3704" not in out
+    assert "[IBAN]" in out
+
+    # German Sozialversicherungsnummer
+    out = redact("SVNR 12 030484 W 023 handed over.")
+    assert "030484" not in out
+    assert "[SVNR]" in out
+
+    # Multi-segment phone
+    out = redact("Phone +49 172 555 0100 anytime.")
+    # The full digit sequence shouldn't survive — at minimum the last group
+    # (which the older regex was missing) must be redacted.
+    assert "0100" not in out, f"phone tail leaked: {out!r}"
+    assert "[PHONE]" in out
+
+    # Email
+    out = redact("Send to max.mueller@email.de please.")
+    assert "max.mueller" not in out
+    assert "[EMAIL]" in out
+
+    # DOB ISO format
+    out = redact("DOB 1984-03-15 confirmed.")
+    assert "1984" not in out
+    assert "[DOB]" in out
+
+
 def test_claim_state_priorities():
     from agent.claim_state import ClaimState, PILLARS
     s = ClaimState(call_id="t")
