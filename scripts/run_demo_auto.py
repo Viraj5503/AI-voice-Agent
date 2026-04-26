@@ -263,6 +263,10 @@ async def run_scenario(scenario_path: Path, pace: str, no_bridge: bool) -> Path:
     # Persist transcript + claim JSON to a timestamped file
     TRANSCRIPT_DIR.mkdir(parents=True, exist_ok=True)
     out_path = TRANSCRIPT_DIR / f"{scenario['name']}_{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S')}.json"
+    base_real = os.path.realpath(TRANSCRIPT_DIR)
+    target_real = os.path.realpath(out_path)
+    if os.path.commonpath([base_real, target_real]) != base_real:
+        raise Exception("Invalid file path")
     out_path.write_text(json.dumps({
         "scenario": scenario,
         "domain": domain.id,
