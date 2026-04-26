@@ -84,20 +84,93 @@ def load_crm(name: str) -> dict:
     return json.loads((REPO / "data" / "crm" / f"{name}.json").read_text(encoding="utf-8"))
 
 
-# ----- juror LLM (Anthropic) ------------------------------------------------
+# ----- juror LLM (provider-pluggable) --------------------------------------
+# The juror brain is configurable via env vars so we can run the harness
+# even when one provider is depleted.  Tries in order:
+#   1. Anthropic — if ANTHROPIC_API_KEY is set AND the call doesn't 4xx
+#   2. OpenAI-compatible — JUROR_LLM_BASE_URL/API_KEY/MODEL, falls back
+#      to LLM_FALLBACK_BASE_URL/API_KEY/MODEL (the same Groq/Cerebras
+#      fallback the voice path uses), so a single .env config works for
+#      both Jamie's brain and the juror's brain.
+#   3. Stub — deterministic placeholder text, lets the harness produce
+#      output even with zero LLM access.
+#
+# A model hint is logged once on first use so it's visible which provider
+# the harness is actually exercising.
+
+_JUROR_PROVIDER_LOGGED: set[str] = set()
+
+
+def _log_provider_once(tag: str, msg: str) -> None:
+    if tag in _JUROR_PROVIDER_LOGGED:
+        return
+    _JUROR_PROVIDER_LOGGED.add(tag)
+    print(f"  [juror] {msg}", file=sys.stderr)
+
+
+async def _juror_chat(
+    system: str,
+    messages: list[dict],
+    *,
+    max_tokens: int = 200,
+) -> str:
+    """Provider-agnostic chat call for the juror persona.  Returns one
+    assistant turn.  Empty string on total failure (caller handles).
+
+    Each provider's outcome is logged the first time it's exercised, so
+    you can see in the run output exactly which path the harness used."""
+
+    # Path 1 — Anthropic
+    if os.environ.get("ANTHROPIC_API_KEY"):
+        try:
+            import anthropic  # type: ignore
+            client = anthropic.AsyncAnthropic()
+            model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
+            resp = await client.messages.create(
+                model=model,
+                max_tokens=max_tokens,
+                system=system,
+                messages=messages,
+            )
+            text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+            _log_provider_once("anthropic-ok", f"using anthropic: {model}")
+            return text
+        except Exception as e:  # 401/402/quota — fall through
+            _log_provider_once(
+                "anthropic-fail",
+                f"anthropic unusable ({type(e).__name__}: {str(e)[:80]}); falling back",
+            )
+
+    # Path 2 — OpenAI-compatible (Groq, Cerebras, Gemini-OpenAI, OpenAI proper)
+    base = os.environ.get("JUROR_LLM_BASE_URL") or os.environ.get("LLM_FALLBACK_BASE_URL")
+    api_key = os.environ.get("JUROR_LLM_API_KEY") or os.environ.get("LLM_FALLBACK_API_KEY")
+    model = os.environ.get("JUROR_LLM_MODEL") or os.environ.get("LLM_FALLBACK_MODEL")
+    if base and api_key and model:
+        try:
+            from openai import AsyncOpenAI  # type: ignore
+            client = AsyncOpenAI(api_key=api_key, base_url=base.rstrip("/") + "/v1")
+            resp = await client.chat.completions.create(
+                model=model,
+                messages=[{"role": "system", "content": system}, *messages],
+                max_tokens=max_tokens,
+                temperature=0.85,
+            )
+            text = (resp.choices[0].message.content or "").strip()
+            _log_provider_once("openai-ok", f"using openai-compat: {model} @ {base}")
+            return text
+        except Exception as e:
+            _log_provider_once(
+                "openai-fail",
+                f"openai-compat failed ({type(e).__name__}: {str(e)[:80]}); returning stubs",
+            )
+
+    # Path 3 — stub
+    _log_provider_once("stub", "no LLM configured — returning stubs")
+    return ""
+
+
 async def _juror_turn(juror_system: str, transcript: list[dict]) -> str:
     """Get the next caller utterance from the juror LLM."""
-    try:
-        import anthropic  # type: ignore
-    except Exception:
-        return "[juror llm unavailable — install anthropic]"
-
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        # Deterministic stub so the harness still produces output without a key.
-        return f"[stub caller turn #{len(transcript)//2 + 1}]"
-
-    client = anthropic.AsyncAnthropic()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     msgs = []
     for t in transcript:
         # Mirror: Jamie speaks → user role to juror; juror speaks → assistant role
@@ -105,24 +178,14 @@ async def _juror_turn(juror_system: str, transcript: list[dict]) -> str:
         msgs.append({"role": role, "content": t["text"]})
     if not msgs or msgs[-1]["role"] == "assistant":
         msgs.append({"role": "user", "content": "(call connects — say something)"})
-    resp = await client.messages.create(
-        model=model,
-        max_tokens=200,
-        system=juror_system,
-        messages=msgs,
-    )
-    return "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+
+    text = await _juror_chat(juror_system, msgs, max_tokens=200)
+    if not text:
+        return f"[stub caller turn #{len(transcript)//2 + 1}]"
+    return text
 
 
 async def _juror_verdict(juror_system: str, transcript: list[dict]) -> tuple[str, float, str]:
-    try:
-        import anthropic  # type: ignore
-    except Exception:
-        return "unsure", 0.0, "anthropic SDK missing"
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return "unsure", 0.0, "no ANTHROPIC_API_KEY — stub run"
-    client = anthropic.AsyncAnthropic()
-    model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-6")
     convo = "\n".join(f"{t['speaker'].upper()}: {t['text']}" for t in transcript)
     prompt = (
         "Below is a transcript of a phone call between you (the juror, role: CALLER) "
@@ -130,18 +193,22 @@ async def _juror_verdict(juror_system: str, transcript: list[dict]) -> tuple[str
         "an AI. Respond as strict JSON: {\"verdict\":\"human|ai|unsure\","
         "\"confidence\":0..1, \"reasoning\":\"…\"}.\n\nTRANSCRIPT:\n" + convo
     )
-    resp = await client.messages.create(
-        model=model,
+    text = await _juror_chat(
+        juror_system,
+        [{"role": "user", "content": prompt}],
         max_tokens=400,
-        system=juror_system,
-        messages=[{"role": "user", "content": prompt}],
     )
-    text = "".join(b.text for b in resp.content if hasattr(b, "text")).strip()
+    if not text:
+        return "unsure", 0.0, "no juror LLM available — stub run"
     try:
         # Cope with code-fenced JSON
         text_clean = text.strip("` \n").lstrip("json").strip()
         data = json.loads(text_clean[text_clean.find("{") : text_clean.rfind("}") + 1])
-        return str(data.get("verdict", "unsure")), float(data.get("confidence", 0.0)), str(data.get("reasoning", ""))
+        return (
+            str(data.get("verdict", "unsure")),
+            float(data.get("confidence", 0.0)),
+            str(data.get("reasoning", "")),
+        )
     except Exception:
         return "unsure", 0.0, text[:300]
 

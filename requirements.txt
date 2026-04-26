@@ -24,6 +24,9 @@ gliner>=0.2.13
 transformers>=4.45.0
 torch>=2.4.0
 huggingface-hub>=0.25.0
+# accelerate is required by transformers.Trainer for both CPU + MPS/CUDA
+# fine-tunes — extraction/finetune_gliner.py won't start without it.
+accelerate>=1.1.0
 
 # Note on Python version: livekit-agents requires Python <3.15.  If you're
 # on Python 3.14, everything in this file installs cleanly.  On 3.13 or 3.12
