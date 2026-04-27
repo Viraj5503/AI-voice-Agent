@@ -1,570 +1,104 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
 <head>
-<meta charset="utf-8" />
-<title>EchoClaim — Inca Human Test · 32BitSavvy</title>
-<meta name="viewport" content="width=1920, initial-scale=1" />
-<style>
-  /* ── EchoClaim brand palette ─────────────────────────────── */
-  :root {
-    --bg-1:        #03060f;
-    --bg-2:        #0a1224;
-    --panel:       #0f1830;
-    --border:      #1f2c4a;
-    --ink:         #f1f6ff;
-    --ink-dim:     #b8c4dc;
-    --muted:       #6f7d9c;
-    --cyan:        #22d3ee;
-    --cyan-soft:   #67e8f9;
-    --cyan-bright: #00f0ff;
-    --violet:      #8b5cf6;
-    --violet-soft: #a78bfa;
-    --pink:        #ec4899;
-  }
-
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-
-  html, body {
-    height: 100%;
-    background: var(--bg-1);
-    color: var(--ink);
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont,
-                 'Segoe UI', system-ui, sans-serif;
-    overflow: hidden;
-    -webkit-font-smoothing: antialiased;
-  }
-
-  /* ── Stage ───────────────────────────────────────────────── */
-  .deck {
-    position: fixed; inset: 0;
-    display: grid; place-items: center;
-    background:
-      radial-gradient(ellipse 80% 60% at 50% 50%,
-        rgba(34, 211, 238, 0.10) 0%, transparent 60%),
-      radial-gradient(ellipse 60% 80% at 0% 100%,
-        rgba(139, 92, 246, 0.08) 0%, transparent 60%),
-      linear-gradient(135deg, var(--bg-1), var(--bg-2));
-  }
-  .stage {
-    width: min(95vw, 1760px);
-    aspect-ratio: 16 / 9;
-    position: relative; overflow: hidden;
-    border-radius: 20px;
-    border: 1px solid rgba(34, 211, 238, 0.18);
-    background: linear-gradient(135deg,
-      rgba(15, 24, 48, 0.7),
-      rgba(3, 6, 15, 0.7));
-    backdrop-filter: blur(8px);
-    box-shadow:
-      0 30px 80px -20px rgba(34, 211, 238, 0.30),
-      inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  }
-  .slide {
-    position: absolute; inset: 0;
-    padding: 6vmin;
-    display: flex; flex-direction: column;
-    opacity: 0; transform: translateY(8px);
-    transition: opacity .45s ease, transform .45s ease;
-    pointer-events: none;
-  }
-  .slide.is-current { opacity: 1; transform: none; pointer-events: auto; }
-
-  /* ── Brand ────────────────────────────────────────────────── */
-  .topbar {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-bottom: 4vmin;
-  }
-  .brand {
-    display: flex; align-items: center; gap: 12px;
-    font-weight: 700; letter-spacing: 0.4px;
-    font-size: 1.6vmin; text-transform: uppercase;
-    color: var(--ink-dim);
-  }
-  .brand .mark { width: 32px; height: 32px; }
-  .brand strong { color: var(--ink); font-weight: 800; }
-  .brand em { font-style: normal; color: var(--cyan); }
-
-  .pageno {
-    font-variant-numeric: tabular-nums;
-    color: var(--muted);
-    font-size: 1.4vmin; letter-spacing: 0.5px;
-  }
-
-  /* ── Typography ──────────────────────────────────────────── */
-  h1 { font-size: 12vmin; line-height: 0.96; letter-spacing: -0.025em; font-weight: 800; }
-  h2 { font-size: 7vmin;  line-height: 1.05; letter-spacing: -0.01em; font-weight: 700; }
-  h3 { font-size: 4vmin;  line-height: 1.1;  font-weight: 700; }
-  h4 { font-size: 2.4vmin; line-height: 1.2; font-weight: 600; color: var(--cyan); text-transform: uppercase; letter-spacing: 0.2em; }
-  p, li { font-size: 2.1vmin; line-height: 1.45; }
-  .lead  { font-size: 3.2vmin; color: var(--ink-dim); line-height: 1.4; }
-  .small { font-size: 1.6vmin; color: var(--muted); }
-
-  .body  { flex: 1; display: flex; flex-direction: column; gap: 3vmin; }
-  .footer {
-    display: flex; align-items: center; justify-content: space-between;
-    margin-top: auto; color: var(--muted); font-size: 1.5vmin;
-  }
-
-  .pill {
-    display: inline-flex; align-items: center; gap: 8px;
-    padding: 6px 14px; border-radius: 999px;
-    background: rgba(34, 211, 238, 0.10);
-    border: 1px solid rgba(34, 211, 238, 0.30);
-    color: var(--cyan-soft);
-    font-size: 1.5vmin; font-weight: 500;
-  }
-
-  /* ── Slide 1: TITLE ──────────────────────────────────────── */
-  .title-stage {
-    justify-content: center; align-items: center; gap: 2.5vmin;
-    text-align: center; padding-top: 0;
-  }
-  .logo-mark {
-    width: 18vmin; height: 18vmin; flex-shrink: 0;
-  }
-  .title-stage .heading {
-    font-size: 14vmin; line-height: 0.9; font-weight: 800;
-    background: linear-gradient(135deg, #ffffff 30%, var(--cyan-soft) 70%, var(--cyan) 100%);
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    letter-spacing: -0.025em;
-    margin-top: 1vmin;
-  }
-  .title-stage .tagline {
-    color: var(--violet-soft);
-    font-size: 2.4vmin;
-    letter-spacing: 0.35em;
-    text-transform: uppercase;
-    font-weight: 500;
-  }
-  .title-stage .meta {
-    display: flex; gap: 2.5vmin; align-items: center;
-    flex-wrap: wrap; justify-content: center;
-    color: var(--muted); font-size: 1.7vmin;
-    margin-top: 3vmin;
-  }
-  .title-stage .meta .dotsep { color: var(--cyan); opacity: 0.5; }
-
-  /* ── Slide 2: HOOK (then cut to demo) ────────────────────── */
-  .hook {
-    flex: 1; display: grid; place-items: center;
-    text-align: center; gap: 4vmin;
-  }
-  .hook .super {
-    color: var(--cyan); font-size: 2vmin; letter-spacing: 0.4em;
-    text-transform: uppercase; font-weight: 600;
-  }
-  .hook h2 {
-    background: linear-gradient(135deg, #ffffff, var(--cyan-soft));
-    -webkit-background-clip: text;
-    background-clip: text;
-    color: transparent;
-    font-size: 9vmin;
-    line-height: 1.05;
-    max-width: 80%;
-  }
-  .hook .hint-text {
-    color: var(--muted); font-size: 1.8vmin;
-    margin-top: 2vmin; letter-spacing: 0.2em; text-transform: uppercase;
-  }
-  .hook .hint-text .arrow {
-    color: var(--cyan);
-    margin-left: 8px;
-    font-size: 2.5vmin;
-    animation: pulse-arrow 1.4s ease-in-out infinite;
-    display: inline-block;
-  }
-  @keyframes pulse-arrow {
-    0%, 100% { transform: translateY(0); opacity: 0.6; }
-    50%      { transform: translateY(6px); opacity: 1; }
-  }
-
-  /* ── Slide 3: STACK ──────────────────────────────────────── */
-  .stack-grid {
-    display: grid;
-    grid-template-columns: 1.3fr 1fr;
-    gap: 4vmin;
-    margin-top: 1vmin;
-    flex: 1;
-    align-items: center;
-  }
-  .arch-flow {
-    display: flex; flex-direction: column; gap: 1.5vmin;
-  }
-  .arch-step {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 1.8vmin 2.2vmin;
-    display: flex; align-items: center; gap: 16px;
-    font-size: 2vmin; color: var(--ink);
-  }
-  .arch-step .num {
-    width: 28px; height: 28px; border-radius: 50%;
-    background: rgba(34, 211, 238, 0.15);
-    border: 1px solid rgba(34, 211, 238, 0.4);
-    color: var(--cyan); font-weight: 700; font-size: 1.6vmin;
-    display: grid; place-items: center;
-    flex: none;
-  }
-  .arch-step strong { color: var(--cyan); font-weight: 600; }
-  .arch-step .meta { margin-left: auto; color: var(--muted); font-size: 1.4vmin; }
-
-  .partners-card {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    padding: 3vmin;
-    display: flex; flex-direction: column; gap: 1.5vmin;
-  }
-  .partners-card h4 { font-size: 1.6vmin; }
-  .partner-list {
-    display: flex; flex-wrap: wrap; gap: 0.8vmin 1vmin;
-  }
-
-  /* ── Slide 4: BOUNTIES + CLOSE ───────────────────────────── */
-  .bounty-grid {
-    display: grid; grid-template-columns: repeat(2, 1fr);
-    gap: 2vmin; margin-top: 2vmin;
-  }
-  .bounty {
-    background: var(--panel);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    padding: 2.2vmin 2.4vmin;
-    display: flex; flex-direction: column; gap: 0.8vmin;
-  }
-  .bounty .b-title { font-size: 2.2vmin; font-weight: 700; color: var(--cyan-soft); }
-  .bounty .b-line { color: var(--ink-dim); font-size: 1.65vmin; line-height: 1.35; }
-
-  .closing-strip {
-    margin-top: 3vmin;
-    background: linear-gradient(135deg,
-      rgba(34, 211, 238, 0.08), rgba(139, 92, 246, 0.08));
-    border: 1px solid rgba(34, 211, 238, 0.25);
-    border-radius: 14px;
-    padding: 2.5vmin 3vmin;
-    display: flex; align-items: center; justify-content: space-between;
-    gap: 2vmin;
-  }
-  .closing-strip .url {
-    font-family: 'JetBrains Mono', 'SF Mono', Menlo, monospace;
-    font-size: 2vmin; color: var(--cyan-soft);
-  }
-  .closing-strip .team {
-    color: var(--ink-dim); font-size: 1.7vmin; text-align: right;
-  }
-  .closing-strip .team strong { color: var(--ink); font-weight: 700; }
-
-  /* ── Auto-advance progress bar ───────────────────────────── */
-  .progress {
-    position: absolute; bottom: 0; left: 0; right: 0;
-    height: 3px; background: rgba(34, 211, 238, 0.10); overflow: hidden;
-  }
-  .progress .fill {
-    height: 100%;
-    background: linear-gradient(90deg, var(--cyan), var(--violet));
-    width: 0%; transition: width 0.2s linear;
-  }
-
-  /* ── Hint chrome ─────────────────────────────────────────── */
-  .hint {
-    position: fixed; bottom: 18px; right: 22px;
-    color: var(--muted); font-size: 11px;
-    background: rgba(15, 24, 48, 0.7);
-    padding: 6px 12px; border-radius: 999px;
-    border: 1px solid var(--border);
-    letter-spacing: 0.5px;
-    backdrop-filter: blur(8px);
-    z-index: 10; transition: opacity 0.4s ease;
-  }
-  .hint.hide { opacity: 0; pointer-events: none; }
-  .hint kbd {
-    background: rgba(34, 211, 238, 0.15);
-    color: var(--cyan-soft);
-    border: 1px solid rgba(34, 211, 238, 0.3);
-    padding: 1px 6px; border-radius: 4px;
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 10px; margin: 0 2px;
-  }
-
-  /* ── Logo image fallback handling ────────────────────────── */
-  .logo-img {
-    width: 18vmin; max-width: 200px; height: auto;
-    display: none;  /* swap to block via JS if PNG present */
-  }
-
-  @media print {
-    html, body { overflow: visible; height: auto; }
-    .deck { position: static; padding: 0; display: block; }
-    .stage { box-shadow: none; border: none; height: 100vh; page-break-after: always; border-radius: 0; }
-    .slide { position: relative; opacity: 1; transform: none; }
-    .hint { display: none; }
-  }
-</style>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title></title>
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="2685.4">
+  <style type="text/css">
+    body {background-color: #04070d}
+    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 12.0px 'Helvetica Neue'; color: #eef3ff; -webkit-text-stroke: #eef3ff; min-height: 15.0px}
+    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 84.0px 'Helvetica Neue'; color: #eef3ff; -webkit-text-stroke: #eef3ff}
+    p.p3 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 14.4px 'Helvetica Neue'; color: #9571f8; -webkit-text-stroke: #9571f8}
+    p.p4 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 10.2px 'Helvetica Neue'; color: #5c698a; -webkit-text-stroke: #5c698a}
+    p.p5 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 10.2px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9}
+    p.p6 {margin: 0.0px 0.0px 0.0px 0.0px; font: 9.6px 'Helvetica Neue'; color: #aab7d4; -webkit-text-stroke: #aab7d4; min-height: 11.0px}
+    p.p7 {margin: 0.0px 0.0px 0.0px 0.0px; font: 9.6px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9}
+    p.p8 {margin: 0.0px 0.0px 0.0px 0.0px; font: 8.4px 'Helvetica Neue'; color: #5c698a; -webkit-text-stroke: #5c698a}
+    p.p9 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 12.0px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9}
+    p.p11 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 10.8px 'Helvetica Neue'; color: #5c698a; -webkit-text-stroke: #5c698a}
+    p.p12 {margin: 0.0px 0.0px 0.0px 0.0px; font: 9.6px 'Helvetica Neue'; color: #eef3ff; -webkit-text-stroke: #eef3ff}
+    p.p14 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px 'Helvetica Neue'; color: #eef3ff; -webkit-text-stroke: #eef3ff}
+    p.p15 {margin: 0.0px 0.0px 0.0px 0.0px; font: 9.0px 'Helvetica Neue'; color: #5ae4f7; -webkit-text-stroke: #5ae4f7}
+    p.p16 {margin: 0.0px 0.0px 0.0px 0.0px; font: 9.0px 'Helvetica Neue'; color: #aab7d4; -webkit-text-stroke: #aab7d4}
+    p.p17 {margin: 0.0px 0.0px 0.0px 0.0px; font: 13.2px 'Helvetica Neue'; color: #5ae4f7; -webkit-text-stroke: #5ae4f7}
+    p.p18 {margin: 0.0px 0.0px 0.0px 0.0px; font: 9.9px 'Helvetica Neue'; color: #aab7d4; -webkit-text-stroke: #aab7d4}
+    p.p19 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Menlo; color: #5ae4f7; -webkit-text-stroke: #5ae4f7}
+    p.p20 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: right; font: 10.2px 'Helvetica Neue'; color: #aab7d4; -webkit-text-stroke: #aab7d4}
+    p.p21 {margin: 0.0px 0.0px 0.0px 0.0px; text-align: right; font: 9.6px 'Helvetica Neue'; color: #5c698a; -webkit-text-stroke: #5c698a}
+    p.p22 {margin: 0.0px 0.0px 0.0px 0.0px; font: 11.0px 'Helvetica Neue'; color: #5c698a; -webkit-text-stroke: #5c698a; background-color: #0d1224; background-color: rgba(13, 18, 36, 0.7)}
+    span.s1 {font-kerning: none}
+    span.s2 {font-kerning: none; color: #eef3ff; -webkit-text-stroke: 0px #eef3ff}
+    span.s3 {font-kerning: none; color: #000000; -webkit-text-stroke: 0px #000000}
+    span.s4 {font-kerning: none; color: #25cae9; -webkit-text-stroke: 0px #25cae9}
+    span.s5 {font: 15.0px 'Helvetica Neue'; font-kerning: none; color: #25cae9; -webkit-text-stroke: 0px #25cae9}
+    span.s6 {font-kerning: none; background-color: rgba(37, 202, 233, 0.15)}
+    span.s7 {font-kerning: none; color: #25cae9; background-color: #0d1224; -webkit-text-stroke: 0px #25cae9}
+    span.s8 {font-kerning: none; background-color: #0d1224}
+    span.s9 {font-kerning: none; background-color: rgba(37, 202, 233, 0.1)}
+    span.s10 {font: 12.0px 'Helvetica Neue'; font-kerning: none; color: #eef3ff; background-color: #0d1224; -webkit-text-stroke: 0px #eef3ff}
+    span.s11 {font: 9.0px Menlo; font-kerning: none; color: #25cae9; background-color: #0d1224; -webkit-text-stroke: 0px #25cae9}
+    span.s12 {font: 10.0px Menlo; font-kerning: none; color: #5ae4f7; background-color: rgba(37, 202, 233, 0.15); -webkit-text-stroke: 0px #5ae4f7}
+  </style>
 </head>
 <body>
-
-<div class="deck">
-  <div class="stage" id="stage">
-
-    <!-- ─── Slide 1: TITLE ───────────────────────────────────── -->
-    <section class="slide title-stage" data-dur="9">
-      <!-- SVG logo (auto-swapped for echoclaim-logo.png if present) -->
-      <svg class="logo-mark" id="logo-svg" viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <stop offset="0%"   stop-color="#67e8f9" />
-            <stop offset="100%" stop-color="#8b5cf6" />
-          </linearGradient>
-          <linearGradient id="barGrad" x1="0%" y1="0%" x2="0%" y2="100%">
-            <stop offset="0%"   stop-color="#00f0ff" />
-            <stop offset="100%" stop-color="#67e8f9" />
-          </linearGradient>
-        </defs>
-        <!-- Outer C ring -->
-        <path d="M 100 18 A 82 82 0 1 0 178 110"
-              stroke="url(#ringGrad)" stroke-width="13"
-              stroke-linecap="round" fill="none" />
-        <!-- Audio waveform bars in centre -->
-        <g fill="url(#barGrad)">
-          <rect x="50"  y="80"  width="9"  height="40" rx="3" />
-          <rect x="65"  y="65"  width="9"  height="70" rx="3" />
-          <rect x="80"  y="50"  width="9"  height="100" rx="3" />
-          <rect x="95"  y="35"  width="9"  height="130" rx="3" />
-          <rect x="110" y="55"  width="9"  height="90"  rx="3" />
-          <rect x="125" y="72"  width="9"  height="56"  rx="3" />
-          <rect x="140" y="85"  width="9"  height="30"  rx="3" />
-        </g>
-      </svg>
-      <img class="logo-img" id="logo-png" src="echoclaim-logo.png" alt="EchoClaim" />
-
-      <div class="heading">EchoClaim.</div>
-      <div class="tagline">Voice that understands · Claims that move</div>
-      <div class="meta">
-        <span>32BitSavvy</span><span class="dotsep">•</span>
-        <span>Het Patel · Viraj Dalsania</span><span class="dotsep">•</span>
-        <span>Inca · The Human Test</span><span class="dotsep">•</span>
-        <span>Big Berlin Hack 2026</span>
-      </div>
-    </section>
-
-    <!-- ─── Slide 2: HOOK (cut to demo after this) ───────────── -->
-    <section class="slide" data-dur="6">
-      <div class="topbar">
-        <div class="brand">
-          <svg class="mark" viewBox="0 0 200 200">
-            <use href="#logo-svg-mini" />
-          </svg>
-          <span><strong>Echo</strong><em>Claim</em></span>
-        </div>
-        <div class="pageno">02 / 04</div>
-      </div>
-      <div class="hook">
-        <div class="super">Inca asked: cross 50% of jurors voting "human"</div>
-        <h2>So we built a voice agent <br/>that <span style="color:var(--cyan)">already knows</span> the caller.</h2>
-        <div class="hint-text">Live demo<span class="arrow">↓</span></div>
-      </div>
-    </section>
-
-    <!-- ─── Slide 3: STACK + PARTNERS ────────────────────────── -->
-    <section class="slide" data-dur="14">
-      <div class="topbar">
-        <div class="brand"><strong>Echo</strong><em>Claim</em></div>
-        <div class="pageno">03 / 04 · how it works</div>
-      </div>
-      <div class="body">
-        <h4>Same engine · any insurance line · 3 claim domains shipping today</h4>
-        <div class="stack-grid">
-          <div class="arch-flow">
-            <div class="arch-step">
-              <span class="num">1</span>
-              <span><strong>Twilio</strong> + <strong>LiveKit SIP</strong> — phone audio in</span>
-              <span class="meta">caller</span>
-            </div>
-            <div class="arch-step">
-              <span class="num">2</span>
-              <span><strong>Gradium STT + TTS</strong> — Emma voice</span>
-              <span class="meta">300ms TTFT</span>
-            </div>
-            <div class="arch-step">
-              <span class="num">3</span>
-              <span><strong>Gemini brain</strong> with CRM + tool-results injected per turn</span>
-              <span class="meta">auto-rotates models</span>
-            </div>
-            <div class="arch-step">
-              <span class="num">4</span>
-              <span><strong>Tavily</strong> live weather / traffic — the "I see on my system…" moment</span>
-              <span class="meta">async</span>
-            </div>
-            <div class="arch-step">
-              <span class="num">5</span>
-              <span><strong>GLiNER2 + Gemini-Lite</strong> extract claim pillars in real time</span>
-              <span class="meta">→ Lovable dashboard</span>
-            </div>
-          </div>
-          <div class="partners-card">
-            <h4>Partners shipped</h4>
-            <div class="partner-list">
-              <span class="pill">Deepmind · Gemini</span>
-              <span class="pill">Gradium · STT/TTS</span>
-              <span class="pill">Pioneer · Fastino · GLiNER2</span>
-              <span class="pill">Tavily · context</span>
-              <span class="pill">Lovable · dashboard</span>
-            </div>
-            <h4 style="margin-top: 1.5vmin;">Provider-pluggable brain</h4>
-            <p class="small" style="font-size: 1.5vmin; color: var(--ink-dim); line-height: 1.4;">
-              Gemini quota dies → flip <code style="color:var(--cyan)">BRAIN_PROVIDER=ollama</code>,
-              Jamie keeps speaking on a local llama3.2.
-              No single point of failure on demo day.
-            </p>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ─── Slide 4: ENGINEERING RIGOR + CLOSE ───────────────── -->
-    <section class="slide" data-dur="14">
-      <div class="topbar">
-        <div class="brand"><strong>Echo</strong><em>Claim</em></div>
-        <div class="pageno">04 / 04 · beyond the conversation</div>
-      </div>
-      <div class="body">
-        <h4>The rigor behind the voice</h4>
-        <div class="bounty-grid">
-          <div class="bounty">
-            <div class="b-title">Security &amp; privacy by default</div>
-            <div class="b-line"><strong>12 PII patterns</strong> redacted before anything touches a log — policy #, VIN, plate, IBAN, credit card, SVNR, Krankenversichertennr, driver licence, phone, email, DOB. Insurance handles GDPR Article 9 health data; we treated it that way from commit one.</div>
-          </div>
-          <div class="bounty">
-            <div class="b-title">Provenance, not just commits</div>
-            <div class="b-line">Every architectural decision is captured in a build journal alongside the diff — so the <em>why</em> of each change lives next to the <em>what</em>. Future maintainers don't have to guess.</div>
-          </div>
-          <div class="bounty">
-            <div class="b-title">Voice quality, three tiers</div>
-            <div class="b-line">Laptop-mic prototype, direct-SDK filler-audio batcher, and a production telephony worker — all on the same voice (Emma family) with STT temperature pinned to suppress noise hallucination on highway / café audio.</div>
-          </div>
-          <div class="bounty">
-            <div class="b-title">Two extraction lanes</div>
-            <div class="b-line"><strong>47 ms · free</strong> on-device named-entity extraction for speed, versus structured-output LLM at <strong>300 ms · $0.0015</strong> for accuracy. Same domain config drives both. The trade-off is a feature, not a hack.</div>
-          </div>
-        </div>
-        <div class="closing-strip">
-          <div>
-            <div class="small" style="color: var(--cyan); letter-spacing: 0.3em; text-transform: uppercase; margin-bottom: 0.5vmin;">repository</div>
-            <div class="url">github.com/IamHetPatel/AI-voice-Agent</div>
-          </div>
-          <div class="team">
-            <strong>EchoClaim</strong> · 32BitSavvy<br/>
-            <span class="small">Het Patel · Viraj Dalsania</span>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <div class="progress" id="progress" style="display:none"><div class="fill" id="progress-fill"></div></div>
-  </div>
-</div>
-
-<div class="hint" id="hint">
-  <kbd>→</kbd> next &nbsp; <kbd>←</kbd> prev &nbsp; <kbd>A</kbd> auto-play &nbsp; <kbd>F</kbd> fullscreen &nbsp; <kbd>?</kbd> hide
-</div>
-
-<script>
-  // If a real EchoClaim PNG logo file exists, swap the SVG out for it.
-  (function tryRealLogo() {
-    const png = document.getElementById('logo-png');
-    const svg = document.getElementById('logo-svg');
-    const test = new Image();
-    test.onload  = () => { png.style.display = 'block'; svg.style.display = 'none'; };
-    test.onerror = () => { /* keep SVG fallback */ };
-    test.src = png.src;
-  })();
-
-  const slides = Array.from(document.querySelectorAll('.slide'));
-  const hint = document.getElementById('hint');
-  const progressEl = document.getElementById('progress');
-  const progressFill = document.getElementById('progress-fill');
-  let idx = 0;
-  let auto = false;
-  let autoTimer = null;
-  let progressTimer = null;
-
-  function show(i) {
-    idx = ((i % slides.length) + slides.length) % slides.length;
-    slides.forEach((s, j) => s.classList.toggle('is-current', j === idx));
-    if (auto) startAutoForCurrent();
-  }
-
-  function startAutoForCurrent() {
-    if (autoTimer) clearTimeout(autoTimer);
-    if (progressTimer) clearInterval(progressTimer);
-    progressEl.style.display = 'block';
-    progressFill.style.width = '0%';
-
-    const dur = parseFloat(slides[idx].dataset.dur || '8') * 1000;
-    const startedAt = Date.now();
-
-    progressTimer = setInterval(() => {
-      const elapsed = Date.now() - startedAt;
-      const pct = Math.min(100, (elapsed / dur) * 100);
-      progressFill.style.width = pct + '%';
-    }, 100);
-
-    autoTimer = setTimeout(() => {
-      if (idx === slides.length - 1) { toggleAuto(false); return; }
-      show(idx + 1);
-    }, dur);
-  }
-
-  function toggleAuto(force) {
-    auto = (force === undefined) ? !auto : force;
-    if (auto) startAutoForCurrent();
-    else {
-      if (autoTimer) clearTimeout(autoTimer);
-      if (progressTimer) clearInterval(progressTimer);
-      progressEl.style.display = 'none';
-    }
-  }
-
-  function fullscreen() {
-    if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(() => {});
-    else document.exitFullscreen?.();
-  }
-
-  document.addEventListener('keydown', (e) => {
-    switch (e.key) {
-      case 'ArrowRight': case ' ': case 'PageDown':
-        show(idx + 1); if (auto) toggleAuto(false); break;
-      case 'ArrowLeft': case 'PageUp':
-        show(idx - 1); if (auto) toggleAuto(false); break;
-      case 'Home': show(0); break;
-      case 'End':  show(slides.length - 1); break;
-      case 'a': case 'A': toggleAuto(); break;
-      case 'f': case 'F': fullscreen(); break;
-      case '?': case '/': hint.classList.toggle('hide'); break;
-      case 'Escape': if (auto) toggleAuto(false); break;
-    }
-  });
-
-  document.getElementById('stage').addEventListener('click', (e) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    if (x < rect.width / 3) show(idx - 1);
-    else show(idx + 1);
-    if (auto) toggleAuto(false);
-  });
-
-  let hintTimer = setTimeout(() => hint.classList.add('hide'), 6000);
-  document.addEventListener('mousemove', () => {
-    hint.classList.remove('hide');
-    clearTimeout(hintTimer);
-    hintTimer = setTimeout(() => hint.classList.add('hide'), 4000);
-  });
-
-  show(0);
-</script>
-
+<p class="p1"><span class="s1"></span><br></p>
+<p class="p2"><span class="s1">EchoClaim.</span></p>
+<p class="p3"><span class="s1">VOICE THAT UNDERSTANDS · CLAIMS THAT MOVE</span></p>
+<p class="p4"><span class="s1">32BitSavvy</span></p>
+<p class="p5"><span class="s1">•</span></p>
+<p class="p4"><span class="s1">Het Patel · Viraj Dalsania</span></p>
+<p class="p5"><span class="s1">•</span></p>
+<p class="p4"><span class="s1">Inca · The Human Test</span></p>
+<p class="p5"><span class="s1">•</span></p>
+<p class="p4"><span class="s1">Big Berlin Hack 2026</span></p>
+<p class="p6"><span class="s1"><b></b></span><br></p>
+<p class="p7"><span class="s2">ECHO</span><span class="s1"><b>CLAIM</b><b></b></span></p>
+<p class="p8"><span class="s1">02 / 04</span></p>
+<p class="p9"><span class="s1">INCA ASKED: CROSS 50% OF JURORS VOTING "HUMAN"</span></p>
+<h2 style="margin: 0.0px 0.0px 0.0px 0.0px; text-align: center; font: 54.0px 'Helvetica Neue'; color: #eef3ff; -webkit-text-stroke: #eef3ff"><span class="s1"><b>So we built a voice agent </b></span><span class="s3"><b><br>
+</b></span><span class="s1"><b>that </b></span><span class="s4"><b>already knows</b></span><span class="s1"><b> the caller.</b><b></b></span></h2>
+<p class="p11"><span class="s1">LIVE DEMO</span><span class="s5">↓</span></p>
+<p class="p12"><span class="s1">ECHO</span></p>
+<p class="p7"><span class="s1"><b>CLAIM</b></span></p>
+<p class="p8"><span class="s1">03 / 04 · how it works</span></p>
+<h4 style="margin: 0.0px 0.0px 0.0px 0.0px; font: 14.4px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9"><span class="s1">SAME ENGINE · ANY INSURANCE LINE · 3 CLAIM DOMAINS SHIPPING TODAY</span></h4>
+<p class="p7"><span class="s6"><b>1</b><b></b></span></p>
+<p class="p14"><span class="s7">Twilio</span><span class="s8"> + </span><span class="s7">LiveKit SIP</span><span class="s8"> — phone audio in</span></p>
+<p class="p8"><span class="s8">caller</span></p>
+<p class="p7"><span class="s6"><b>2</b><b></b></span></p>
+<p class="p14"><span class="s7">Gradium STT + TTS</span><span class="s8"> — Het’s voice (kinda)</span></p>
+<p class="p8"><span class="s8">300ms TTFT</span></p>
+<p class="p7"><span class="s6"><b>3</b><b></b></span></p>
+<p class="p14"><span class="s7">Gemini brain</span><span class="s8"> with CRM + tool-results injected per turn</span></p>
+<p class="p8"><span class="s8">auto-rotates models</span></p>
+<p class="p7"><span class="s6"><b>4</b><b></b></span></p>
+<p class="p14"><span class="s7">Tavily</span><span class="s8"> live weather / traffic — the "I see on my system…" moment</span></p>
+<p class="p8"><span class="s8">async</span></p>
+<p class="p7"><span class="s6"><b>5</b><b></b></span></p>
+<p class="p14"><span class="s7">GLiNER2 + Gemini-Lite</span><span class="s8"> extract claim pillars in real time</span></p>
+<p class="p8"><span class="s8">→ Lovable dashboard</span></p>
+<h4 style="margin: 0.0px 0.0px 0.0px 0.0px; font: 9.6px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9"><span class="s8">PARTNERS SHIPPED</span></h4>
+<p class="p15"><span class="s9">Deepmind · Gemini</span><span class="s10"> </span><span class="s9">Gradium · STT/TTS</span><span class="s10"> </span><span class="s9">Pioneer · Fastino · GLiNER2</span><span class="s10"> </span><span class="s9">Tavily · context</span><span class="s10"> </span><span class="s9">Lovable · dashboard</span></p>
+<h4 style="margin: 0.0px 0.0px 0.0px 0.0px; font: 9.6px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9"><span class="s8">PROVIDER-PLUGGABLE BRAIN</span></h4>
+<p class="p16"><span class="s8">Gemini quota dies → flip </span><span class="s11">BRAIN_PROVIDER=ollama</span><span class="s8">, Jamie keeps speaking on a local llama3.2. No single point of failure on demo day.</span></p>
+<p class="p12"><span class="s1">ECHO</span></p>
+<p class="p7"><span class="s1"><b>CLAIM</b></span></p>
+<p class="p8"><span class="s1">04 / 04 · beyond the conversation</span></p>
+<h4 style="margin: 0.0px 0.0px 0.0px 0.0px; font: 14.4px 'Helvetica Neue'; color: #25cae9; -webkit-text-stroke: #25cae9"><span class="s1">THE RIGOR BEHIND THE VOICE</span></h4>
+<p class="p17"><span class="s8"><b>Security &amp; privacy by default</b><b></b></span></p>
+<p class="p18"><span class="s8"><b>12 PII patterns</b> redacted before anything touches a log — policy #, VIN, plate, IBAN, credit card, SVNR, Krankenversichertennr, driver licence, phone, email, DOB. Insurance handles GDPR Article 9 health data; we treated it that way from commit one.</span></p>
+<p class="p17"><span class="s8"><b>Provenance, not just commits</b><b></b></span></p>
+<p class="p18"><span class="s8">Every architectural decision is captured in a build journal alongside the diff — so the <i>why</i> of each change lives next to the <i>what</i>. Future maintainers don't have to guess.</span></p>
+<p class="p17"><span class="s8"><b>Voice quality, three tiers</b><b></b></span></p>
+<p class="p18"><span class="s8">Laptop-mic prototype, direct-SDK filler-audio batcher, and a production telephony worker — all on the same voice (Emma family) with STT temperature pinned to suppress noise hallucination on highway / café audio.</span></p>
+<p class="p17"><span class="s8"><b>Two extraction lanes</b><b></b></span></p>
+<p class="p18"><span class="s8"><b>47 ms · free</b> on-device named-entity extraction for speed, versus structured-output LLM at <b>300 ms · $0.0015</b> for accuracy. Same domain config drives both. The trade-off is a feature, not a hack.</span></p>
+<p class="p7"><span class="s1">REPOSITORY</span></p>
+<p class="p19"><span class="s1">github.com/IamHetPatel/AI-voice-Agent</span></p>
+<p class="p20"><span class="s2"><b>EchoClaim</b></span><span class="s1"> · 32BitSavvy</span></p>
+<p class="p21"><span class="s1">Het Patel · Viraj Dalsania</span></p>
+<p class="p22"><span class="s12">→</span><span class="s1"> next   </span><span class="s12">←</span><span class="s1"> prev   </span><span class="s12">A</span><span class="s1"> auto-play   </span><span class="s12">F</span><span class="s1"> fullscreen   </span><span class="s12">?</span><span class="s1"> hide</span></p>
 </body>
 </html>
